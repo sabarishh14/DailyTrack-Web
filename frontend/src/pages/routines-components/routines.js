@@ -121,6 +121,27 @@ export function monthGrid(month) {
 
 export const percent = (score) => (score && score.fraction != null ? `${Math.round(score.fraction * 100)}%` : '—');
 
+/** A score as a ring's mix: kept in green, missed in red; skips are excused, so in neither. */
+export const scoreMix = (score) => (score && score.fraction != null
+  ? { done: score.fraction, skipped: 0, missed: 1 - score.fraction, open: 0 }
+  : null);
+
+/** The consistency score in a few words, as the phone puts it. */
+export function verdict(score) {
+  const f = score?.fraction;
+  if (f == null) return 'No score yet';
+  if (f >= 0.9) return 'Rock solid';
+  if (f >= 0.75) return 'Going strong';
+  if (f >= 0.5) return 'Building up';
+  return 'Room to grow';
+}
+
+/** Points gained (or lost) on the stretch before, or null until both have a score. */
+export function trendPoints(now, before) {
+  if (now?.fraction == null || before?.fraction == null) return null;
+  return Math.round((now.fraction - before.fraction) * 100);
+}
+
 export const streakLength = (count, unit) => {
   if (unit === 'time') return `${count} on time`;
   return `${count} ${unit}${count === 1 ? '' : 's'}`;

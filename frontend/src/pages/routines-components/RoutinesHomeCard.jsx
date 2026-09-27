@@ -1,8 +1,8 @@
 import { useEffect, useState } from 'react';
 import { EmojiBadge, MixRing } from './RoutineParts';
-import { fetchSummary, mix, percent } from './routines';
+import { fetchSummary, percent, scoreMix, trendPoints, verdict } from './routines';
 
-/** Today's routines at a glance on Home; opens the Routines tab. */
+/** Routines at a glance on Home: consistency leads, today's count under it. Opens the Routines tab. */
 export default function RoutinesHomeCard({ onOpen, dataVersion }) {
   const [summary, setSummary] = useState(null);
   const [failed, setFailed] = useState(false);
@@ -21,26 +21,36 @@ export default function RoutinesHomeCard({ onOpen, dataVersion }) {
   const byId = Object.fromEntries(active.map(r => [r.id, r]));
   const open = summary?.items.filter(i => i.needs_answer) || [];
   const stats = summary?.stats;
+  const scored = summary?.consistency.fraction != null;
+  const trend = summary ? trendPoints(summary.consistency, summary.previous_consistency) : null;
+  const streak = summary?.perfect_days.current || 0;
 
-  let sub = 'Loading…';
-  if (summary && active.length === 0) sub = 'Start one in the DailyTrack app';
-  else if (summary && summary.items.length === 0) sub = 'Nothing due today';
-  else if (summary) sub = open.length > 0 ? `${open.length} left for today` : stats.missed === 0 ? 'All done for today 🎉' : 'All answered for today';
+  let today = 'Loading…';
+  if (summary && active.length === 0) today = 'Add a habit, a challenge or a chore';
+  else if (summary && stats.total === 0 && open.length === 0) today = 'Nothing due today';
+  else if (summary) {
+    today = open.length > 0 ? `${stats.done} of ${stats.total} done today · ${open.length} left`
+      : stats.missed === 0 ? 'All done today 🎉' : 'All answered today';
+  }
 
   return (
     <button className="rt-home-card" onClick={onOpen}>
-      <MixRing mix={summary && stats.total > 0 ? mix(stats, summary.today) : null} size={84} stroke={8}>
+      <MixRing mix={scoreMix(summary?.consistency)} size={88} stroke={7}>
         {summary && active.length > 0
-          ? <span className="rt-home-count">{stats.done}<small>/{stats.total}</small></span>
+          ? <><span className="rt-home-count">{percent(summary.consistency)}</span><span className="rt-home-caption">30 days</span></>
           : <span style={{ fontSize: '1.6rem' }}>🌱</span>}
       </MixRing>
       <span className="rt-home-text">
-        <span className="rt-home-title">Routines</span>
-        <span className="rt-home-sub">{sub}</span>
-        {summary && active.length > 0 && (
+        <span className="rt-home-title">
+          {scored ? <>Routines · {verdict(summary.consistency)}</> : 'Routines'}
+        </span>
+        <span className="rt-home-sub">{today}</span>
+        {summary && active.length > 0 && (trend != null || streak > 0) && (
           <span className="rt-home-chips">
-            <span>📈 {percent(summary.consistency)} · 30 days</span>
-            {summary.perfect_days.current > 0 && <span>🔥 {summary.perfect_days.current} perfect {summary.perfect_days.current === 1 ? 'day' : 'days'}</span>}
+            {trend != null && trend !== 0 && (
+              <span className={trend > 0 ? 'up' : 'down'}>{trend > 0 ? `▲ ${trend}%` : `▼ ${-trend}%`} vs previous 30 days</span>
+            )}
+            {streak > 0 && <span>🔥 {streak} perfect {streak === 1 ? 'day' : 'days'}</span>}
           </span>
         )}
       </span>

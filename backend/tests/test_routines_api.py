@@ -293,6 +293,7 @@ class RoutinesApiTest(unittest.TestCase):
         self.assertEqual(s["today"], today.isoformat())
         self.assertEqual((s["stats"]["done"], s["stats"]["total"]), (1, 1))
         self.assertAlmostEqual(s["consistency"]["fraction"], 2 / 3)
+        self.assertIsNone(s["previous_consistency"]["fraction"])
         items = {i["routine_id"]: i for i in s["items"]}
         self.assertEqual(items[read["id"]]["status"], "done")
         self.assertEqual(items[read["id"]]["line"], "Every day")

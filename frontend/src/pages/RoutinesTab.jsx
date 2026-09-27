@@ -2,7 +2,9 @@ import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { EmojiBadge, HistoryCalendar, ItemRow, Legend, MixRing, WeekBars } from './routines-components/RoutineParts';
 import { DayModal, RoutineModal } from './routines-components/RoutineModals';
 import RoutineEditor from './routines-components/RoutineEditor';
-import { addDays, dayMonth, fetchSummary, mix, percent, saveAnswer, weekday } from './routines-components/routines';
+import {
+  addDays, dayMonth, fetchSummary, mix, percent, saveAnswer, scoreMix, trendPoints, verdict, weekday,
+} from './routines-components/routines';
 
 // Per-viewer conveniences only; the page works the same without them.
 const readPref = (key, fallback) => {
@@ -140,32 +142,51 @@ function RoutinesTab() {
   }
 
   const left = items.filter(i => i.needs_answer).length;
-  const headline = items.length === 0 ? 'Nothing due today'
-    : left > 0 ? `${left} left for today`
-      : stats.missed === 0 ? 'All done for today 🎉' : 'All answered for today';
+  const hasDue = stats.total > 0;
+  const todayLine = left > 0 ? `${left} left to answer`
+    : !hasDue ? 'Nothing due today'
+      : stats.missed === 0 ? 'All done 🎉' : 'All answered';
+  const perfect = summary.perfect_days;
+  const streakLine = perfect.best === 0 ? '🌱 Your first perfect day starts a streak'
+    : perfect.current >= 2 ? `🔥 ${perfect.current}-day streak · best ${perfect.best}`
+      : perfect.current === 1 ? `🔥 1 perfect day · best ${perfect.best}`
+        : `Best streak: ${perfect.best} ${perfect.best === 1 ? 'day' : 'days'}`;
+  const trend = trendPoints(summary.consistency, summary.previous_consistency);
 
   return (
     <>
       <div className="rt-grid">
         <div className="rt-col">
+          {/* Consistency leads; today sits right under it. */}
           <section className="rt-card rt-hero">
-            <MixRing mix={mix(stats, today)} size={128} stroke={11}>
-              <span className="rt-hero-count">{stats.done}<small>/{stats.total}</small></span>
-              <span className="rt-hero-caption">today</span>
-            </MixRing>
-            <div className="rt-hero-text">
-              <div className="rt-hero-date">{weekday(today)}, {dayMonth(today)}</div>
-              <div className="rt-hero-title">{headline}</div>
-              <div className="rt-hero-stats">
-                <div>
-                  <b>{percent(summary.consistency)}</b>
-                  <span>Last 30 days</span>
+            <div className="rt-hero-top">
+              <MixRing mix={scoreMix(summary.consistency)} size={148} stroke={12}>
+                <span className="rt-hero-count">{percent(summary.consistency)}</span>
+                <span className="rt-hero-caption">30 days</span>
+              </MixRing>
+              <div className="rt-hero-text">
+                <div className="rt-hero-date">Consistency</div>
+                <div className="rt-hero-title">{verdict(summary.consistency)}</div>
+                <div className="rt-muted">
+                  {summary.consistency.fraction == null ? 'Shows up after your first day' : 'Over the last 30 days'}
                 </div>
-                <div>
-                  <b>🔥 {summary.perfect_days.current}</b>
-                  <span>Perfect days · best {summary.perfect_days.best}</span>
-                </div>
+                {trend != null && (
+                  <div className="rt-trend">
+                    {trend > 0 && <b className="up">▲ {trend}%</b>}
+                    {trend < 0 && <b className="down">▼ {-trend}%</b>}
+                    {trend === 0 ? '= same as previous 30 days' : ' vs previous 30 days'}
+                  </div>
+                )}
+                <span className="rt-streak-chip">{streakLine}</span>
               </div>
+            </div>
+            <div className="rt-today">
+              {hasDue ? <MixRing mix={mix(stats, today)} size={34} stroke={4} /> : <span className="rt-today-icon">☀️</span>}
+              <span className="rt-today-text">
+                <b>Today · {weekday(today)}, {dayMonth(today)}</b>
+                <span>{todayLine}</span>
+              </span>
+              <span className="rt-today-count">{hasDue ? <>{stats.done}<small>/{stats.total}</small></> : '—'}</span>
             </div>
           </section>
 

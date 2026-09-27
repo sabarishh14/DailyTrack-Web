@@ -502,6 +502,7 @@ def build_summary(owner, today, month):
         "today": today.isoformat(),
         "stats": _stats_json(engine.day_stats(today)),
         "consistency": _score_json(engine.consistency(today)),
+        "previous_consistency": _score_json(engine.previous_consistency(today)),
         "perfect_days": _streak_json(engine.perfect_days(today)),
         "items": [_item_json(i, streaks.get(i.routine.id)) for i in engine.day_items(today)],
         "upcoming": [{"routine_id": r.id, "date": d.isoformat(), "when": _due_in(d, today)}
@@ -659,7 +660,8 @@ def chat_context(owner, today):
         "unanswered counts as missed. Times-per-week/month routines are judged per week or month, "
         "with partial credit. Chores are on time when done by their due date.",
         f"Today: {s.done} of {s.total} done, {s.missed} missed, {s.skipped} skipped, {s.unanswered} not answered yet.",
-        f"Last 30 days, all routines: {_percent(engine.consistency(today))}. "
+        f"Consistency over the last 30 days, all routines: {_percent(engine.consistency(today))} "
+        f"(the 30 days before that: {_percent(engine.previous_consistency(today))}). "
         f"Perfect days streak: {_streak_text(engine.perfect_days(today))}.",
         "This week: " + "; ".join(
             f"{w.date:%a} {w.done}/{w.total} done" + (f", {w.missed} missed" if w.missed else "")

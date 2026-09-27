@@ -198,6 +198,10 @@ class RoutineEngine:
     def consistency(self, today, days=30):
         return self.score(today - timedelta(days=days - 1), today, today)
 
+    def previous_consistency(self, today, days=30):
+        """The days before the last `days`: what consistency is compared with."""
+        return self.score(today - timedelta(days=2 * days - 1), today - timedelta(days=days), today)
+
     def routine_consistency(self, routine, today, days=30):
         return self.score(today - timedelta(days=days - 1), today, today, [routine])
 

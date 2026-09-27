@@ -7760,14 +7760,21 @@ input[type="date"]::-webkit-calendar-picker-indicator {
 /* Hero */
 .rt-hero {
   display: flex;
+  flex-direction: column;
+  gap: 1.1rem;
+  background: radial-gradient(circle at 0% 0%, rgba(var(--accent-rgb), 0.16), transparent 60%), var(--card);
+}
+
+.rt-hero-top {
+  display: flex;
   align-items: center;
   gap: 1.75rem;
-  background: radial-gradient(circle at 0% 0%, rgba(var(--accent-rgb), 0.16), transparent 60%), var(--card);
 }
 
 .rt-hero-count {
   font-family: 'Syne', sans-serif;
-  font-size: 2rem;
+  font-size: 1.5rem;
+  letter-spacing: -0.02em;
   font-weight: 800;
   color: var(--text);
   line-height: 1;
@@ -7780,11 +7787,12 @@ input[type="date"]::-webkit-calendar-picker-indicator {
 }
 
 .rt-hero-caption {
-  font-size: 0.66rem;
+  margin-top: 5px;
+  font-size: 0.6rem;
+  font-weight: 600;
   text-transform: uppercase;
-  letter-spacing: 0.08em;
+  letter-spacing: 0.1em;
   color: var(--text2);
-  margin-top: 3px;
 }
 
 .rt-hero-text {
@@ -7801,32 +7809,85 @@ input[type="date"]::-webkit-calendar-picker-indicator {
 
 .rt-hero-title {
   font-family: 'Syne', sans-serif;
-  font-size: 1.45rem;
+  font-size: 1.6rem;
   font-weight: 800;
   color: var(--text);
-  margin: 0.3rem 0 1rem;
+  margin: 0.2rem 0 0.1rem;
 }
 
-.rt-hero-stats {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 1.75rem;
+.rt-trend {
+  margin-top: 0.55rem;
+  font-size: 0.8rem;
+  color: var(--text3);
 }
 
-.rt-hero-stats > div {
-  display: flex;
-  flex-direction: column;
-  gap: 0.15rem;
+.rt-trend b.up,
+.rt-home-chips .up {
+  color: #34C759;
 }
 
-.rt-hero-stats b {
-  font-family: 'Syne', sans-serif;
-  font-size: 1.3rem;
+.rt-trend b.down,
+.rt-home-chips .down {
+  color: #FF453A;
+}
+
+.rt-streak-chip {
+  display: inline-block;
+  margin-top: 0.7rem;
+  padding: 0.3rem 0.75rem;
+  background: var(--bg3);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  font-size: 0.76rem;
+  font-weight: 600;
   color: var(--text);
 }
 
-.rt-hero-stats span {
-  font-size: 0.74rem;
+.rt-today {
+  display: flex;
+  align-items: center;
+  gap: 0.85rem;
+  padding: 0.7rem 0.95rem;
+  background: var(--card2);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+}
+
+.rt-today-icon {
+  width: 34px;
+  text-align: center;
+  font-size: 1.2rem;
+}
+
+.rt-today-text {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  text-align: left;
+}
+
+.rt-today-text b {
+  font-size: 0.86rem;
+  color: var(--text);
+}
+
+.rt-today-text span {
+  font-size: 0.76rem;
+  color: var(--text2);
+}
+
+.rt-today-count {
+  font-family: 'Syne', sans-serif;
+  font-size: 1.5rem;
+  font-weight: 800;
+  color: var(--text);
+  line-height: 1;
+}
+
+.rt-today-count small {
+  font-size: 0.9rem;
   color: var(--text2);
 }
 
@@ -8545,7 +8606,8 @@ input[type="date"]::-webkit-calendar-picker-indicator {
 
 .rt-home-count {
   font-family: 'Syne', sans-serif;
-  font-size: 1.35rem;
+  font-size: 0.9rem;
+  letter-spacing: -0.02em;
   font-weight: 800;
   color: var(--text);
   line-height: 1;
@@ -8555,6 +8617,16 @@ input[type="date"]::-webkit-calendar-picker-indicator {
   font-size: 0.8rem;
   color: var(--text2);
 }
+
+.rt-home-caption {
+  margin-top: 3px;
+  font-size: 0.5rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--text2);
+}
+
 
 .rt-home-text {
   flex: 1;
@@ -9110,14 +9182,10 @@ input[type="date"]::-webkit-calendar-picker-indicator {
     padding: 1rem;
   }
 
-  .rt-hero {
+  .rt-hero-top {
     flex-direction: column;
     gap: 1rem;
     text-align: center;
-  }
-
-  .rt-hero-stats {
-    justify-content: center;
   }
 
   .rt-bar {

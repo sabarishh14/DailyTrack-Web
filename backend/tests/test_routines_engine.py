@@ -100,6 +100,17 @@ class ScoreTest(unittest.TestCase):
         answered = engine([read], at(read, MON, DONE), at(read, day(2), MISSED))
         self.assertAlmostEqual(answered.consistency(day(2)).fraction, 1 / 3)
 
+    def test_consistency_is_compared_with_the_same_stretch_just_before_it(self):
+        read = daily(1)
+        e = engine([read], at(read, MON, DONE),
+                   at(read, day(1), DONE), at(read, day(2), DONE), at(read, day(3), MISSED), at(read, day(4), DONE),
+                   at(read, day(5), DONE), at(read, day(6), DONE), at(read, day(7), DONE), at(read, day(8), DONE),
+                   at(read, day(9), DONE))
+        # Days 6 to 10, with today (day 10) still open: 4 of 4.
+        self.assertAlmostEqual(e.consistency(day(10), days=5).fraction, 1.0)
+        # Days 1 to 5: 4 of 5. Monday is in neither.
+        self.assertAlmostEqual(e.previous_consistency(day(10), days=5).fraction, 0.8)
+
     def test_skips_are_excused(self):
         read = daily(1)
         e = engine([read], at(read, MON, DONE), at(read, day(1), SKIPPED), at(read, day(2), MISSED))
