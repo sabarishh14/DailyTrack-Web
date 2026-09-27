@@ -9,7 +9,7 @@ the shared API key, which has no person behind it, can't reach them. Anyone who 
 view the "gym" module (shown as Routines) manages their own list, so writes only
 need view access too.
 """
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 import pytz
 from flask import Blueprint, request, jsonify
@@ -61,6 +61,14 @@ def _int_in(value, low, high):
     return number if low <= number <= high else None
 
 
+def _created_on(r):
+    """The IST day it was added. The phone doesn't hold unanswered days before
+    then against it: nobody could have answered them."""
+    if not r.created_at:
+        return None
+    return r.created_at.replace(tzinfo=timezone.utc).astimezone(IST).date().isoformat()
+
+
 def _routine_dict(r):
     return {
         "id": r.id,
@@ -76,6 +84,7 @@ def _routine_dict(r):
         "end_date": r.end_date.isoformat() if r.end_date else None,
         "sort_order": r.sort_order,
         "archived": bool(r.archived),
+        "created_at": _created_on(r),
     }
 
 

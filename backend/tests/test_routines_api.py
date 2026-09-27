@@ -133,6 +133,7 @@ class RoutinesApiTest(unittest.TestCase):
             (None, None, None, None),
         )
         self.assertEqual(routine["start_date"], _ist_today().isoformat())
+        self.assertEqual(routine["created_at"], _ist_today().isoformat())
         self.assertEqual(routine["kind"], "build")
         self.assertFalse(routine["archived"])
 
