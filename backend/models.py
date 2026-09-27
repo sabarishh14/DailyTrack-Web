@@ -212,3 +212,35 @@ class DeviceToken(db.Model):
     token = db.Column(db.String(255), primary_key=True)
     email = db.Column(db.String(120), nullable=False, index=True)
     updated_at = db.Column(db.DateTime, default=datetime.utcnow)
+class Routine(db.Model):
+    """A habit, challenge or recurring chore on the Routines page. Personal:
+    every query is scoped to owner_email. What's due when, streaks and scores are
+    worked out on the phone from these rows and their check-ins."""
+    __tablename__ = "routines"
+    # BIGSERIAL on Postgres; SQLite (the API tests) only auto-numbers INTEGER keys.
+    id = db.Column(db.BigInteger().with_variant(db.Integer, "sqlite"), primary_key=True)
+    owner_email = db.Column(db.String(120), nullable=False, index=True)
+    name = db.Column(db.String(60), nullable=False)
+    emoji = db.Column(db.String(16))
+    kind = db.Column(db.String(8), nullable=False, default="build")       # build | avoid
+    schedule = db.Column(db.String(10), nullable=False, default="daily")  # daily | days | weekly | monthly | interval
+    days = db.Column(db.SmallInteger)       # "days": weekday bitmask, Mon=1 … Sun=64
+    target = db.Column(db.SmallInteger)     # "weekly" / "monthly": times per period
+    every = db.Column(db.SmallInteger)      # "interval": every N …
+    unit = db.Column(db.String(6))          # … day | week | month
+    # First day it counts; for "interval", the first due date.
+    start_date = db.Column(db.Date, nullable=False)
+    end_date = db.Column(db.Date)           # a challenge's last day, inclusive
+    sort_order = db.Column(db.Integer, nullable=False, default=0)
+    archived = db.Column(db.Boolean, nullable=False, default=False)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+class RoutineCheckIn(db.Model):
+    """One day's answer for a routine: done, missed or skipped (a genuine reason)."""
+    __tablename__ = "routine_checkins"
+    __table_args__ = (db.UniqueConstraint("routine_id", "date", name="uq_routine_checkin_day"),)
+    id = db.Column(db.BigInteger().with_variant(db.Integer, "sqlite"), primary_key=True)
+    routine_id = db.Column(db.BigInteger, db.ForeignKey("routines.id", ondelete="CASCADE"), nullable=False)
+    date = db.Column(db.Date, nullable=False)
+    status = db.Column(db.String(8), nullable=False)  # done | missed | skipped
+    note = db.Column(db.String(120))
+    updated_at = db.Column(db.DateTime, default=datetime.utcnow)

@@ -8,7 +8,7 @@ import { getToken } from '../utils';
 
 const MODULES = [
   { id: 'money', icon: '💰', label: 'Money', desc: 'Transactions, budgets, splits & the Add page' },
-  { id: 'gym', icon: '🏋️', label: 'Gym & Activity', desc: 'Workout and sports log' },
+  { id: 'gym', icon: '🌱', label: 'Routines & Gym', desc: 'Their own routines on the phone, and the gym log' },
   { id: 'invest', icon: '📈', label: 'Investments', desc: 'Portfolio, holdings & manual assets' },
   { id: 'sabdekho', icon: '📺', label: 'SabDekho', desc: 'Movies, shows & watch diary' },
 ];

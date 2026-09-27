@@ -1275,16 +1275,21 @@ def get_movie_stats():
                     supplementary_tags[mt] = supplementary_tags.get(mt, 0) + 1
                 
                 if l.movie:
-                    theatre_movies.append({
+                    visit = {
                         'log_id': l.id,
                         'movie_id': l.movie_id,
                         'tmdb_id': l.movie.tmdb_id,
                         'name': l.movie.name,
                         'poster_path': l.movie.poster_path,
-                        'rating': l.rating,
                         'release_year': l.movie.release_year,
                         'tags': movie_tags
-                    })
+                    }
+                    # Left out rather than null while unrated: app builds up to
+                    # 1.0.19 model it as a non-null number and drop the whole
+                    # stats payload on a null.
+                    if l.rating is not None:
+                        visit['rating'] = l.rating
+                    theatre_movies.append(visit)
                     
         theatre_stats = {
             "total_visits": total_visits,

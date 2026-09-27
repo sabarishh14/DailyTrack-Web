@@ -7,6 +7,7 @@ import pytz
 import requests
 import threading
 import pandas as pd
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 from extensions import (
     db,
     SHEETS_URL, JWT_SECRET, ALLOWED_EMAILS, ADMIN_USER, ADMIN_PASS,
@@ -243,10 +244,16 @@ def register_device():
         return jsonify({"success": False, "message": "Missing token"}), 400
     if not access.balances_visible:
         return jsonify({"success": True, "registered": False})
-    row = DeviceToken.query.get(token) or DeviceToken(token=token, email=access.email or '')
-    row.email = access.email or row.email
-    row.updated_at = datetime.utcnow()
-    db.session.add(row)
+    # One atomic upsert: two registrations of the same token arriving together
+    # would both miss on a read-then-insert and collide on the primary key.
+    now = datetime.utcnow()
+    stmt = pg_insert(DeviceToken).values(token=token, email=access.email or '', updated_at=now)
+    stmt = stmt.on_conflict_do_update(
+        index_elements=[DeviceToken.token],
+        set_={"email": db.func.coalesce(db.func.nullif(stmt.excluded.email, ''), DeviceToken.email),
+              "updated_at": now},
+    )
+    db.session.execute(stmt)
     db.session.commit()
     return jsonify({"success": True, "registered": True})
 

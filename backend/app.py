@@ -95,7 +95,8 @@ with app.app_context():
     try:
         db.session.execute(text("ALTER TABLE accounts ADD COLUMN IF NOT EXISTS min_balance NUMERIC(14,2)"))
         db.session.commit()
-        # New tables only (balance_adjustments, device_tokens); existing ones are left alone.
+        # New tables only (balance_adjustments, device_tokens, routines, routine_checkins);
+        # existing ones are left alone.
         import models  # noqa: F401 - registers every table before create_all
         db.create_all()
         # Running balances and account filters walk one account's history in date order.
@@ -119,6 +120,7 @@ from blueprints.auth import auth_bp
 from blueprints.admin import admin_bp
 from blueprints.media import media_bp
 from blueprints.chat import chat_bp
+from blueprints.routines import routines_bp
 
 app.register_blueprint(core_bp)
 app.register_blueprint(money_bp)
@@ -129,6 +131,7 @@ app.register_blueprint(auth_bp)
 app.register_blueprint(admin_bp)
 app.register_blueprint(media_bp)
 app.register_blueprint(chat_bp)
+app.register_blueprint(routines_bp)
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=5000, debug=True)
