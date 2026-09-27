@@ -11,10 +11,11 @@ import CustomSelect from '../components/CustomSelect';
 import ReconciliationModal from '../components/ReconciliationModal';
 import { MinBalanceChip, balanceLevel } from '../components/BalanceImpact';
 import { useAccess } from '../access/AccessContext';
+import RoutinesHomeCard from './routines-components/RoutinesHomeCard';
 import { apiGet, apiPost, useApi, monthKey } from '../api/money';
 import { yearOptions } from '../utils';
 
-function HomeTab({ accounts = [], physical = [], investments = [], budgets, onRefresh, dataVersion, showBalances, setShowBalances }) {
+function HomeTab({ accounts = [], investments = [], budgets, onRefresh, dataVersion, showBalances, setShowBalances, onOpenRoutines }) {
   const access = useAccess();
   const canMoney= access.can('money');
   const canGym = access.can('gym');
@@ -22,8 +23,6 @@ function HomeTab({ accounts = [], physical = [], investments = [], budgets, onRe
   const showBalancesSection = access.money.balancesVisible;
   const fullMoney = access.money.fullAccess;
   const [isReconcileOpen, setIsReconcileOpen] = useState(false);
-  const [physMonth, setPhysMonth] = useState(new Date().getMonth());
-  const [physYear, setPhysYear] = useState(new Date().getFullYear());
   const [moneyMonth, setMoneyMonth] = useState(new Date().getMonth());
   const [moneyYear, setMoneyYear] = useState(new Date().getFullYear());
   const [syncing, setSyncing] = useState(false);
@@ -136,13 +135,6 @@ const [showInvestments, setShowInvestments] = useState(false);
   const totalReturn = totalCurrent - totalInvested;
   const totalRetPct = latestInv ? parseFloat(latestInv.total_ret_pct || 0) : 0;
 
-  const physActive = physical.filter(p => {
-    if (!p.date) return false;
-    const d = new Date(p.date);
-    return d.getMonth() === physMonth && d.getFullYear() === physYear &&
-      (p.gym || p.badminton || p.table_tennis || p.cricket || p.others);
-  }).length;
-
   const budgetSummary = useMemo(() => {
     if (!budgets || budgets.length === 0) return { over: 0, total: 0, active: false };
 
@@ -188,7 +180,7 @@ const [showInvestments, setShowInvestments] = useState(false);
       </div>
       )}
 
-      {/* Hero row: Net Worth + Physical Activity */}
+      {/* Hero row: Net Worth + Routines */}
       {(showBalancesSection || canGym) && (
       <div className="home-hero" style={showBalancesSection && canGym ? undefined : { gridTemplateColumns: '1fr' }}>
         {showBalancesSection && (
@@ -211,29 +203,7 @@ const [showInvestments, setShowInvestments] = useState(false);
           </div>
         </div>
         )}
-        {canGym && (
-        <div className="phys-home-card">
-          <div className="phys-num">{physActive}</div>
-          <div style={{ flex: 1 }}>
-            <div className="phys-info-label">Days Active</div>
-            <div className="phys-info-sub">{MONTHS[physMonth]} {physYear}</div>
-          </div>
-          <div className="phys-controls">
-            <CustomSelect
-              value={physMonth}
-              onChange={val => setPhysMonth(parseInt(val))}
-              options={MONTHS.map((m, i) => ({ label: m, value: i }))}
-              minWidth="120px"
-            />
-            <CustomSelect
-              value={physYear}
-              onChange={val => setPhysYear(parseInt(val))}
-              options={yearOptions().map(y => ({ label: String(y), value: y }))}
-              minWidth="90px"
-            />
-          </div>
-        </div>
-        )}
+        {canGym && <RoutinesHomeCard onOpen={onOpenRoutines} dataVersion={dataVersion} />}
       </div>
       )}
 

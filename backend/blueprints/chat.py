@@ -16,10 +16,32 @@ from access import require_api_key, require_admin, require_access, current_acces
 from google import genai
 from sqlalchemy import text
 
+from blueprints.routines import chat_context as routines_chat_context, routine_names
+
 chat_bp = Blueprint("chat", __name__)
 
 # Nagapandi only ever needs these tables; anything else in generated SQL is refused.
-CHAT_BLOCKED = re.compile(r"\b(pg_\w*|information_schema|allowed_emails|accounts|budgets|splits|sync_log)\b", re.IGNORECASE)
+# Routines are personal, so they're never queried directly: Nagapandi is handed
+# the asking person's own, worked out (see _routines_rule).
+CHAT_BLOCKED = re.compile(
+    r"\b(pg_\w*|information_schema|allowed_emails|accounts|budgets|splits|sync_log|routines|routine_\w+)\b",
+    re.IGNORECASE,
+)
+IST = pytz.timezone("Asia/Kolkata")
+
+
+def _routines_rule(owner):
+    """The part of the first prompt that routes routine questions away from SQL."""
+    if not owner:
+        return ""
+    names, first_start = routine_names(owner)
+    listed = ", ".join(f'"{n}"' for n in names) if names else "none added yet"
+    since = f" Routines began on {first_start}; for activity before then, use physical_activity." if first_start else ""
+    return f'''
+    ROUTINES: The user also tracks personal routines (habits, challenges and chores with a daily check-in). Theirs: {listed}.
+    If the question is about any of these, or about their habits, routines, streaks, challenges, check-ins, chores or consistency,
+    do NOT write SQL. Return exactly {{"routines": true}} instead. physical_activity is the older activity log.{since}
+    '''
 
 
 def _validate_generated_sql(sql):
@@ -60,7 +82,9 @@ def handle_chat_query():
 
     def generate(prompt_text):
         return client.models.generate_content(model=model_name, contents=prompt_text).text or ""
-    
+
+    owner = (current_access().email or "").strip().lower() or None
+
     prompt = f'''
     You are 'Nagapandi', a highly capable AI assistant for a personal tracking app (LifeTrack). 
     Your goal is to answer the user's question by generating a PostgreSQL query.
@@ -80,7 +104,7 @@ def handle_chat_query():
     6. Specific Merchants, items, or details are stored in `description` (e.g., 'California Burrito', 'Amazon', 'Electricity').
     7. To search for a specific merchant or item (like "california burrito" or "haircut"), use `description ILIKE '%merchant%' OR heading ILIKE '%merchant%'`.
     8. If asked "how much" or "total", return a SUM (`SELECT SUM(amount)`). If asked "how many times", return a COUNT (`SELECT COUNT(*)`). If asked "when was the last", return a MAX date (`SELECT MAX(date)`).
-    
+    {_routines_rule(owner)}
     User Query: "{user_query}"
     
     Write a SQL query to fetch the exact data needed to answer the user's question. 
@@ -96,6 +120,20 @@ def handle_chat_query():
         if resp_text.endswith('```'): resp_text = resp_text[:-3]
         
         parsed = json.loads(resp_text.strip())
+        if parsed.get("routines") and owner:
+            context = routines_chat_context(owner, datetime.now(IST).date())
+            prompt2 = f'''
+        You are 'Nagapandi', a highly capable AI assistant for LifeTrack.
+        User asked: "{user_query}"
+        Here is everything about the user's routines, already worked out:
+        {context}
+
+        Answer based ONLY on this. Be fast, conversational and direct; brief, smooth and friendly.
+        Use emojis where appropriate, and cheer genuine progress. Use the percentages and streaks exactly as given.
+        Do NOT mention "the data" or how it was given to you.
+        '''
+            return jsonify({"success": True, "result": generate(prompt2).strip()})
+
         sql_query = parsed.get("sql")
         
         sql_query, error = _validate_generated_sql(sql_query)

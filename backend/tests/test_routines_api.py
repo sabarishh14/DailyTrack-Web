@@ -274,6 +274,135 @@ class RoutinesApiTest(unittest.TestCase):
         self.assertTrue(listing["routines"][0]["archived"])
         self.assertEqual(len(listing["checkins"]), 1)
 
+    # ---- worked-out views ----
+
+    def summary(self, email=VIEWER, query=""):
+        resp = self.call("GET", f"/api/routines/summary{query}", email)
+        self.assertEqual(resp.status_code, 200, resp.get_json())
+        return resp.get_json()
+
+    def test_the_summary_works_things_out_like_the_phone(self):
+        today = _ist_today()
+        read = self.create(name="Read", emoji="📖", start_date=(today - timedelta(days=2)).isoformat())
+        gym = self.create(name="Gym", schedule="weekly", target=3)
+        self.checkin(read["id"], (today - timedelta(days=2)).isoformat(), "done")
+        self.checkin(read["id"], (today - timedelta(days=1)).isoformat(), "missed")
+        self.checkin(read["id"], today.isoformat(), "done")
+
+        s = self.summary()
+        self.assertEqual(s["today"], today.isoformat())
+        self.assertEqual((s["stats"]["done"], s["stats"]["total"]), (1, 1))
+        self.assertAlmostEqual(s["consistency"]["fraction"], 2 / 3)
+        items = {i["routine_id"]: i for i in s["items"]}
+        self.assertEqual(items[read["id"]]["status"], "done")
+        self.assertEqual(items[read["id"]]["line"], "Every day")
+        self.assertFalse(items[gym["id"]]["required"])
+        self.assertTrue(items[gym["id"]]["needs_answer"])
+        self.assertEqual(items[gym["id"]]["progress"]["needed"], min(3, 7 - today.weekday()))
+        self.assertEqual(len(s["week"]), 7)
+        self.assertEqual(sum(1 for w in s["week"] if w is not None), today.weekday() + 1)
+        self.assertEqual(len(s["history"]), today.day)
+        self.assertEqual(s["month"], today.strftime("%Y-%m"))
+        routines = {r["id"]: r for r in s["routines"]}
+        self.assertEqual(routines[read["id"]]["streak"], {"current": 1, "best": 1, "unit": "day"})
+        self.assertEqual(routines[gym["id"]]["schedule_text"], "3× a week")
+
+    def test_the_summary_is_personal(self):
+        self.create(VIEWER)
+        self.assertEqual(self.summary(OTHER)["routines"], [])
+        self.assertEqual(self.call("GET", "/api/routines/summary", api_key=True).status_code, 403)
+        self.assertEqual(self.call("GET", "/api/routines/summary", NO_GYM).status_code, 403)
+
+    def test_archived_routines_are_listed_but_not_scored(self):
+        routine = self.create()
+        self.checkin(routine["id"], _ist_today().isoformat(), "done")
+        self.call("PUT", f"/api/routines/{routine['id']}", body={"archived": True})
+        s = self.summary()
+        self.assertEqual(s["items"], [])
+        self.assertTrue(s["routines"][0]["archived"])
+        self.assertNotIn("streak", s["routines"][0])
+        self.assertEqual(self.call("GET", f"/api/routines/{routine['id']}/detail").status_code, 404)
+
+    def test_months_are_checked_and_never_ahead(self):
+        self.assertEqual(self.call("GET", "/api/routines/summary?month=Sept").status_code, 400)
+        self.assertEqual(self.summary(query="?month=2099-01")["month"], _ist_today().strftime("%Y-%m"))
+        self.assertEqual(self.summary(query="?month=2026-01")["month"], "2026-01")
+        self.assertEqual(len(self.summary(query="?month=2026-02")["history"]), 28)
+
+    def test_kept_it_up_fills_only_blank_past_days(self):
+        today = _ist_today()
+        start = today - timedelta(days=4)
+        read = self.create(name="Read", start_date=start.isoformat())
+        self.checkin(read["id"], (start + timedelta(days=1)).isoformat(), "missed")
+        self.assertEqual(self.summary()["routines"][0]["past_blank"], {"count": 3, "since": start.isoformat()})
+
+        self.assertEqual(self.call("POST", f"/api/routines/{read['id']}/fill-past", OTHER).status_code, 404)
+        resp = self.call("POST", f"/api/routines/{read['id']}/fill-past")
+        self.assertEqual(resp.get_json(), {"success": True, "filled": 3})
+        statuses = {c["date"]: c["status"] for c in self.listing()["checkins"]}
+        self.assertEqual(statuses[(start + timedelta(days=1)).isoformat()], "missed")
+        self.assertEqual(sorted(s for s in statuses.values()), ["done", "done", "done", "missed"])
+        self.assertNotIn(today.isoformat(), statuses)
+        self.assertEqual(self.summary()["routines"][0]["past_blank"]["count"], 0)
+
+    def test_any_past_day_can_be_looked_at(self):
+        today = _ist_today()
+        start = today - timedelta(days=3)
+        read = self.create(name="Read", start_date=start.isoformat())
+        self.checkin(read["id"], start.isoformat(), "done")
+        resp = self.call("GET", f"/api/routines/day?date={start.isoformat()}")
+        self.assertEqual(resp.status_code, 200, resp.get_json())
+        d = resp.get_json()
+        self.assertEqual([(i["routine_id"], i["status"]) for i in d["items"]], [(read["id"], "done")])
+        self.assertEqual((d["stats"]["done"], d["stats"]["total"]), (1, 1))
+        before = self.call("GET", f"/api/routines/day?date={(start - timedelta(days=1)).isoformat()}").get_json()
+        self.assertEqual(before["items"], [])
+        ahead = (today + timedelta(days=1)).isoformat()
+        self.assertEqual(self.call("GET", f"/api/routines/day?date={ahead}").status_code, 400)
+        self.assertEqual(self.call("GET", "/api/routines/day?date=soon").status_code, 400)
+
+    def test_a_routines_own_page(self):
+        today = _ist_today()
+        chore = self.create(name="AC filter", schedule="interval", every=30, unit="day",
+                            start_date=(today - timedelta(days=3)).isoformat())
+        self.checkin(chore["id"], (today - timedelta(days=1)).isoformat(), "skipped", note="Away")
+        resp = self.call("GET", f"/api/routines/{chore['id']}/detail")
+        self.assertEqual(resp.status_code, 200, resp.get_json())
+        d = resp.get_json()
+        self.assertEqual(d["routine"]["schedule_text"], "Every 30 days")
+        self.assertEqual(d["next_due"], (today - timedelta(days=3)).isoformat())
+        self.assertEqual(d["skips"], [{"date": (today - timedelta(days=1)).isoformat(), "note": "Away"}])
+        self.assertEqual(len(d["days"]), today.day)
+        todays = d["days"][-1]
+        self.assertEqual(todays["line"], "Overdue by 3 days")
+        self.assertEqual(self.call("GET", f"/api/routines/{chore['id']}/detail", OTHER).status_code, 404)
+
+    def test_nagapandi_gets_only_the_asking_persons_routines_worked_out(self):
+        from blueprints.routines import chat_context, routine_names
+        today = _ist_today()
+        read = self.create(name="Read", emoji="📖", start_date=(today - timedelta(days=1)).isoformat())
+        self.checkin(read["id"], (today - timedelta(days=1)).isoformat(), "skipped", note="Unwell")
+        self.create(OTHER, name="Secret habit")
+        with self.app.app_context():
+            mine = chat_context(VIEWER, today)
+            self.assertIn("📖 Read: Every day", mine)
+            self.assertIn('skipped ("Unwell")', mine)
+            self.assertIn("today not answered yet", mine)
+            self.assertNotIn("Secret habit", mine)
+            self.assertEqual(routine_names(VIEWER), (["Read"], today - timedelta(days=1)))
+            self.assertEqual(chat_context(NO_GYM, today), "They haven't added any routines yet.")
+
+    def test_nagapandi_cannot_query_routine_tables_directly(self):
+        try:
+            from blueprints.chat import _validate_generated_sql
+        except ImportError as e:  # google-genai not installed here
+            self.skipTest(str(e))
+        for sql in ("SELECT * FROM routines", "select note from routine_checkins",
+                    "WITH r AS (SELECT 1) SELECT * FROM ROUTINES"):
+            with self.subTest(sql=sql):
+                self.assertEqual(_validate_generated_sql(sql)[1], "Nagapandi can't look at that data.")
+        self.assertIsNone(_validate_generated_sql("SELECT SUM(amount) FROM transactions")[1])
+
 
 if __name__ == "__main__":
     unittest.main()

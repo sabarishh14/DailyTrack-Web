@@ -11,12 +11,11 @@ import { auth } from './config/firebase';
 import MemoizedHomeTab from './pages/HomeTab';
 import MemoizedMoneyTab from './pages/MoneyTab';
 import MemoizedAddTab from './pages/AddTab';
-import MemoizedGymTab from './pages/GymTab';
+import MemoizedRoutinesTab from './pages/RoutinesTab';
 import MemoizedInvestTab from './pages/InvestTab';
 import MemoizedSabDekho from './pages/SabDekho';
 import LoginPage from './components/LoginPage';
 import LoadingScreen from './components/LoadingScreen';
-import AddActivityModal from './components/AddActivityModal';
 import AccessControlModal from './components/AccessControlModal';
 import { AccessProvider, buildAccess, loadStoredAccess, storeAccess, canOpenTab } from './access/AccessContext';
 import GlobalSearchModal from './components/GlobalSearchModal';
@@ -66,11 +65,9 @@ export default function App() {
   const [showBalances, setShowBalances] = useState(false);
 const [categories, setCategories] = useState([]);
   const [budgets, setBudgets] = useState([]); // 🚀 NEW STATE FOR BUDGETS
-  const [physical, setPhysical] = useState([]);
   const [investments, setInvestments] = useState([]);
   const [manualAssets, setManualAssets] = useState([]); // 🚀 NEW STATE
   const [assetList, setAssetList] = useState({}); // 🚀 NEW: Dropdown options
-const [isActivityModalOpen, setIsActivityModalOpen] = useState(false);
 
   // 🔐 ACCESS CONTROL: what this user may see/do (refreshed from /auth/me)
   const [accessRaw, setAccessRaw] = useState(loadStoredAccess);
@@ -91,7 +88,6 @@ const [isActivityModalOpen, setIsActivityModalOpen] = useState(false);
   useEffect(() => {
     const handleEsc = (e) => {
       if (e.key === 'Escape') {
-        setIsActivityModalOpen(false);
         setIsSecretMenuOpen(false);
         setIsMenuOpen(false);
       }
@@ -216,7 +212,6 @@ const [isActivityModalOpen, setIsActivityModalOpen] = useState(false);
     setAuthNotice(typeof notice === 'string' ? notice : '');
     setIsLoggedIn(false);
 setAccounts([]);
-    setPhysical([]);
     setInvestments([]);
   }, []);
 
@@ -369,9 +364,8 @@ setAccounts([]);
       // Only ask for what this user can see; everything else resolves empty.
       const when = (allowed, url, name, empty) => allowed ? fetchWithCheck(url, name) : Promise.resolve(empty);
       const money = acl.can('money'), invest = acl.can('invest');
-      const [acc, phy, inv, manAssets, listRes, catRes, budRes] = await Promise.all([
+      const [acc, inv, manAssets, listRes, catRes, budRes] = await Promise.all([
         when(money, `${API}/accounts`, 'Accounts', []),
-        when(acl.can('gym'), `${API}/physical`, 'Health & Fitness', []),
         when(invest, `${API}/investments`, 'Investments', []),
         when(invest, `${API}/manual_assets`, 'Manual Assets', []),
 when(invest, `${API}/assets/list`, 'Market Symbols', {}),
@@ -382,7 +376,6 @@ when(invest, `${API}/assets/list`, 'Market Symbols', {}),
       if (showLoading) addLog("Data parsed successfully. Finalizing UI...");
 
       setAccounts(acc);
-setPhysical(phy);
       setInvestments(inv);
       setManualAssets(manAssets);
       setAssetList(listRes); // 🚀 SAVE SYMBOLS
@@ -421,17 +414,20 @@ setPhysical(phy);
 const today = new Date();
   const dateStr = today.toLocaleDateString('en-IN', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
 
+  // Stable, so the memoised Home tab doesn't re-render for it.
+  const openRoutines = useCallback(() => setTab(3), []);
+
   const renderTab = () => {
     return (
       <>
-        {tab === 0 && <MemoizedHomeTab accounts={accounts ?? []} physical={physical ?? []} investments={investments ?? []} budgets={budgets ?? []} onRefresh={fetchAll} dataVersion={dataVersion} showBalances={showBalances} setShowBalances={setShowBalances} />}
+        {tab === 0 && <MemoizedHomeTab accounts={accounts ?? []} investments={investments ?? []} budgets={budgets ?? []} onRefresh={fetchAll} dataVersion={dataVersion} showBalances={showBalances} setShowBalances={setShowBalances} onOpenRoutines={openRoutines} />}
         {access.can('money') && (
           <div style={{ display: tab === 1 ? 'contents' : 'none' }}>
             <MemoizedMoneyTab accounts={accounts} categories={categories} budgets={budgets} onRefresh={fetchAll} refreshBudgets={refreshBudgets} globalActionTx={globalActionTx} setGlobalActionTx={setGlobalActionTx} dataVersion={dataVersion} isActive={tab === 1} />
           </div>
         )}
         {tab === 2 && <MemoizedAddTab accounts={accounts} categories={categories} onAdd={fetchAll} dataVersion={dataVersion} />}
-        {tab === 3 && <MemoizedGymTab physical={physical} onOpenModal={() => setIsActivityModalOpen(true)} />}
+        {tab === 3 && <MemoizedRoutinesTab />}
         {tab === 4 && <MemoizedInvestTab investments={investments} manualAssets={manualAssets} assetList={assetList} onAdd={fetchAll} />}
         {tab === 5 && <MemoizedSabDekho API={API} getToken={getToken} showMovies={showMovies} refreshTrigger={sabDekhoRefresh} />}
       </>
@@ -497,14 +493,6 @@ const today = new Date();
           {renderTab()}
         </main>
       </div>
-
-      {/* Floating Add Activity Modal */}
-      {isActivityModalOpen && (
-        <AddActivityModal
-          onAdd={fetchAll}
-          onClose={() => setIsActivityModalOpen(false)}
-        />
-      )}
 
       {/* 🚀 HIDDEN DEVELOPER MENU */}
       {isSecretMenuOpen && isAdmin && (

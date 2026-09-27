@@ -25,9 +25,9 @@ export const TABS = [
   { id: 0, icon: "🏠", label: "Home" },
   { id: 1, icon: "💰", label: "Money" },
   { id: 2, icon: "➕", label: "Add Transaction", add: true },
-  { id: 3, icon: "🏋️", label: "Gym & Activity" },
+  { id: 3, icon: "✅", label: "Routines" },
   { id: 4, icon: "📈", label: "Investments" },
   { id: 5, icon: "📺", label: "SabDekho" },
 ];
 
-export const TAB_TITLES = ["Dashboard", "Money", "Add Transaction", "Gym & Activity", "Investments", "SabDekho"];
+export const TAB_TITLES = ["Dashboard", "Money", "Add Transaction", "Routines", "Investments", "SabDekho"];
