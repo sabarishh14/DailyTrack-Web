@@ -279,6 +279,84 @@ def update_account():
     db.session.commit()
 
     return jsonify({'success': True})
+
+ACCOUNT_KINDS = ("savings", "credit_card")
+MAX_ACCOUNT_NAME = 50
+
+def _account_dict(acc):
+    return {
+        "account": acc.account,
+        "balance": acc.balance,
+        "real_balance": acc.real_balance,
+        "balance_tracked": acc.balance_tracked,
+        "min_balance": acc.min_balance,
+    }
+
+def _optional_amount(raw):
+    """A money amount from the request: None when blank, a float otherwise. Raises ValueError."""
+    if raw in (None, ''):
+        return None
+    value = round(float(raw), 2)
+    if value != value or value in (float('inf'), float('-inf')):
+        raise ValueError("not a number")
+    return value
+
+@money_bp.route('/api/accounts', methods=['POST'])
+@require_access("money")
+def create_account():
+    """Adds an account: {name, type, balance?, min_balance?}.
+
+    A savings account tracks its balance (starting from `balance`) and may keep a
+    floor. A credit card is named CC-... like the others, which is what marks it
+    as one everywhere, and its balance isn't tracked, so it stays out of totals."""
+    denied = _need_full_money()
+    if denied: return denied
+    data = request.json or {}
+
+    def bad(message, status=400):
+        return jsonify({"success": False, "message": message}), status
+
+    kind = data.get("type")
+    if kind not in ACCOUNT_KINDS:
+        return bad("Pick a savings account or a credit card")
+    name = " ".join(str(data.get("name") or "").split())
+    if kind == "credit_card":
+        bare = re.sub(r"^CC[\s\-]*", "", name, flags=re.IGNORECASE).strip()
+        if not bare:
+            return bad("Give the card a name")
+        name = f"CC-{bare}"
+    else:
+        if not name:
+            return bad("Give the account a name")
+        if is_cc_account(name):
+            return bad("Names starting with CC are for credit cards")
+    if len(name) > MAX_ACCOUNT_NAME:
+        return bad(f"Keep the name under {MAX_ACCOUNT_NAME} characters")
+
+    taken = Account.query.filter(db.func.lower(Account.account) == name.lower()).first()
+    if taken:
+        return bad(f"There's already an account called {taken.account}", 409)
+
+    try:
+        balance = _optional_amount(data.get("balance")) or 0.0
+        min_balance = _optional_amount(data.get("min_balance"))
+    except (TypeError, ValueError):
+        return bad("Amounts must be numbers")
+    if min_balance is not None and min_balance < 0:
+        return bad("The minimum balance can't be negative")
+
+    savings = kind == "savings"
+    account = Account(
+        account=name,
+        balance=balance if savings else 0,
+        real_balance=None,
+        balance_tracked=savings,
+        min_balance=min_balance if savings else None,
+    )
+    db.session.add(account)
+    db.session.commit()
+    return jsonify({"success": True, "account": _account_dict(account)})
+
 @money_bp.route('/api/transactions/categories', methods=['GET'])
 @require_access("money")
 def get_categories():
