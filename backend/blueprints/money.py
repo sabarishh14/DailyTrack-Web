@@ -308,7 +308,9 @@ def create_account():
 
     A savings account tracks its balance (starting from `balance`) and may keep a
     floor. A credit card is named CC-... like the others, which is what marks it
-    as one everywhere, and its balance isn't tracked, so it stays out of totals."""
+    as one everywhere. It's listed alongside them (tracked, like the existing
+    cards) at ₹0, which transactions never move (see apply_balance), so it
+    doesn't change any totals."""
     denied = _need_full_money()
     if denied: return denied
     data = request.json or {}
@@ -350,7 +352,7 @@ def create_account():
         account=name,
         balance=balance if savings else 0,
         real_balance=None,
-        balance_tracked=savings,
+        balance_tracked=True,
         min_balance=min_balance if savings else None,
     )
     db.session.add(account)

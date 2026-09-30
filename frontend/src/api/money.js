@@ -1,6 +1,6 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { API } from '../constants';
-import { getToken } from '../utils';
+import { accountOptions, getToken } from '../utils';
 
 // Money data is filtered, grouped and paged on the server (backend/blueprints/
 // money_query.py) instead of downloading every transaction into the browser.
@@ -60,6 +60,16 @@ export function useMoneyMeta(dataVersion, enabled = true) {
 // For modals opened from anywhere: reuses whatever meta is loaded, fetching once if none is.
 export function useLatestMoneyMeta() {
   return useMoneyMeta(metaCache.version ?? 'latest');
+}
+
+/**
+ * Every account as dropdown options, from the server's list (which includes
+ * accounts added with nothing on them yet). [current] keeps an account that's
+ * already chosen in the list even if it isn't there.
+ */
+export function useAccountOptions(current) {
+  const accounts = (useLatestMoneyMeta().data || EMPTY_META).accounts;
+  return useMemo(() => accountOptions(current ? [...accounts, current] : accounts), [accounts, current]);
 }
 
 export const EMPTY_META = {

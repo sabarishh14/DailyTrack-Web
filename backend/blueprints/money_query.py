@@ -177,6 +177,15 @@ def _meta_fingerprint():
         return None
 
 
+def _with_every_account(tx_accounts):
+    """The accounts transactions use, plus every account that's been set up (and
+    may be seen), so one added a moment ago, with nothing on it yet, can be picked
+    straight away. Read fresh each time: the cache follows transactions only."""
+    access = current_access()
+    names = set(tx_accounts) | {a for (a,) in db.session.query(Account.account).all() if a}
+    return sorted(n for n in names if access.account_allowed(n))
+
+
 # ---- endpoints ----
 @money_query_bp.route('/api/money/meta', methods=['GET'])
 @require_access("money")
@@ -188,7 +197,7 @@ def money_meta():
     fingerprint = _meta_fingerprint()
     cached = _meta_cache.get(scope)
     if fingerprint and cached and cached[0] == fingerprint:
-        return jsonify(cached[1])
+        return jsonify({**cached[1], "accounts": _with_every_account(cached[1]["accounts"])})
 
     months = [m for (m,) in _scoped(Transaction.month).distinct().all() if m]
     years = sorted({str(m.year) for m in months}, reverse=True)
@@ -237,7 +246,7 @@ def money_meta():
     }
     if fingerprint:
         _meta_cache[scope] = (fingerprint, result)
-    return jsonify(result)
+    return jsonify({**result, "accounts": _with_every_account(accounts)})
 
 
 @money_query_bp.route('/api/money/summary', methods=['GET'])

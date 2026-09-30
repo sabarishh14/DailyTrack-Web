@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { API, BANKS } from '../constants';
-import { fmt, getToken, isCcAccount, balanceDelta, evaluateMath } from '../utils';
+import { fmt, getToken, isCcAccount, balanceDelta, evaluateMath, getBankEmoji, accountColor } from '../utils';
 
 // How close a balance is to its floor: 'danger' below it, 'warn' within half
 // the floor above it, otherwise 'ok'. Without a floor, only overdraft warns.
@@ -57,7 +57,7 @@ export function BalancesPanel({ accounts, projected, saved }) {
     .filter(a => projected[a.account] || savedBy[a.account] || balanceLevel(a.balance, a.min_balance ?? null) === 'danger')
     .sort((a, b) => {
       const ia = order.indexOf(a.account), ib = order.indexOf(b.account);
-      return (ia === -1 ? 999 : ia) - (ib === -1 ? 999 : ib);
+      return (ia === -1 ? 999 : ia) - (ib === -1 ? 999 : ib) || a.account.localeCompare(b.account);
     });
   if (shown.length === 0) return null;
 
@@ -77,11 +77,11 @@ export function BalancesPanel({ accounts, projected, saved }) {
           <div
             key={a.account}
             className={`bal-chip ${level} ${draft ? 'drafting' : ''} ${moved ? 'moved' : ''}`}
-            style={{ '--acc-color': BANKS[a.account]?.color }}
+            style={{ '--acc-color': accountColor(a.account) }}
             title={note ? `${a.account} · ${note}` : a.account}
           >
             <div className="bal-chip-top">
-              <span className="bal-chip-acc">{BANKS[a.account]?.emoji} {a.account}</span>
+              <span className="bal-chip-acc">{getBankEmoji(a.account)} {a.account}</span>
               {moved && delta !== 0 && (
                 <span className={`bal-chip-delta ${delta < 0 ? 'neg' : 'pos'}`}>
                   {delta < 0 ? '−' : '+'}{fmt(Math.abs(delta))}{recent ? ' saved' : ''}

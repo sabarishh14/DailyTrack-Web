@@ -64,15 +64,26 @@ class AccountsApiTest(unittest.TestCase):
         account = self.add(name="Cash", type="savings", balance="", min_balance=None).get_json()["account"]
         self.assertEqual((account["balance"], account["min_balance"]), (0, None))
 
-    def test_a_credit_card_is_named_cc_and_left_untracked(self):
+    def test_a_credit_card_is_named_cc_and_listed_like_the_others_at_zero(self):
         for typed, expected in [("AXIS REWARDS", "CC-AXIS REWARDS"), ("cc sbi 1234", "CC-sbi 1234"), ("CC-HDFC", "CC-HDFC")]:
             with self.subTest(typed=typed):
                 resp = self.add(name=typed, type="credit_card", balance=5000, min_balance=100)
                 self.assertEqual(resp.status_code, 200, resp.get_json())
                 account = resp.get_json()["account"]
                 self.assertEqual(account["account"], expected)
-                self.assertFalse(account["balance_tracked"])
+                # Tracked like the existing cards, so it's listed where they are...
+                self.assertTrue(account["balance_tracked"])
+                # ...at nothing, with no floor: a card's balance never moves.
                 self.assertEqual((account["balance"], account["min_balance"]), (0, None))
+
+    def test_new_accounts_are_offered_before_they_have_transactions(self):
+        from blueprints.money_query import money_query_bp
+        self.app.register_blueprint(money_query_bp)
+        self.add(name="HDFC", type="savings")
+        self.add(name="AXIS", type="credit_card")
+        resp = self.client.get("/api/money/meta", headers={"Authorization": f"Bearer {setup._token(OWNER)}"})
+        self.assertEqual(resp.status_code, 200, resp.get_json())
+        self.assertEqual(resp.get_json()["accounts"], ["CC-AXIS", "HDFC"])
 
     def test_names_are_unique_whatever_the_case(self):
         self.add(name="KOTAK", type="savings")

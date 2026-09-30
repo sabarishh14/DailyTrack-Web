@@ -4,10 +4,10 @@ import {
   fmt, getToken, evaluateMath, balanceDelta, isCcAccount,
   buildDescriptionIndex, categoriesForType, descriptionOptions,
 } from '../../utils';
-import { useLatestMoneyMeta, EMPTY_META } from '../../api/money';
+import { useAccountOptions, useLatestMoneyMeta, EMPTY_META } from '../../api/money';
 import {
   SheetSelect, SheetSuggest, toDisplayDate, parseDisplayDate,
-  ACCOUNT_OPTIONS, TYPE_OPTIONS, renderAccount, renderType,
+  TYPE_OPTIONS, renderAccount, renderType,
 } from './SheetCells';
 
 const today = () => new Date().toISOString().split('T')[0];
@@ -28,6 +28,7 @@ export default function SheetEntryRow({ gridColumns, tableMinWidth, withBalances
     description: '',
   });
   const [row, setRow] = useState(() => blank());
+  const accountOptions = useAccountOptions(row.account);
   const [status, setStatus] = useState(null); // null | 'saving' | 'saved' | { error }
   const [dateText, setDateText] = useState(() => toDisplayDate(row.date));
   const dateInvalid = parseDisplayDate(dateText) === null;
@@ -110,7 +111,7 @@ export default function SheetEntryRow({ gridColumns, tableMinWidth, withBalances
           label="Account"
           value={row.account}
           onChange={set('account')}
-          options={ACCOUNT_OPTIONS}
+          options={accountOptions}
           renderValue={renderAccount}
         />
       </span>

@@ -1,18 +1,17 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { BANKS } from '../../constants';
-import { evaluateMath } from '../../utils';
+import { useAccountOptions } from '../../api/money';
+import { evaluateMath, getBankEmoji } from '../../utils';
 
 // Spreadsheet-style cells for the transactions table: they look like the
 // table's own text until focused, and open the app's dropdown list.
 
 export const TX_TYPES = ['Debit', 'Credit', 'Savings', 'Investment'];
-export const ACCOUNT_OPTIONS = Object.keys(BANKS).map(b => ({ value: b, label: `${BANKS[b].emoji} ${b}` }));
 export const TYPE_OPTIONS = TX_TYPES.map(t => ({ value: t, label: t }));
 
 export const renderAccount = (v) => (
   <span className="sheet-account-value">
-    <span>{BANKS[v]?.emoji}</span>
+    <span>{getBankEmoji(v)}</span>
     <span>{v}</span>
   </span>
 );
@@ -188,6 +187,7 @@ export function SheetSuggest({ value, onChange, options, placeholder, label, inp
  * cancels. Pickers (account, type) save on pick.
  */
 export function CellEditor({ tx, field, suggestions = [], onCommit, onCancel }) {
+  const accountOptions = useAccountOptions(tx.account);
   const initial = field === 'date' ? toDisplayDate(tx.date)
     : field === 'amount' ? String(tx.amount)
     : String(tx[field] ?? '');
@@ -233,7 +233,7 @@ export function CellEditor({ tx, field, suggestions = [], onCommit, onCancel }) 
           autoOpen
           label={field}
           value={tx[field]}
-          options={field === 'account' ? ACCOUNT_OPTIONS : TYPE_OPTIONS}
+          options={field === 'account' ? accountOptions : TYPE_OPTIONS}
           renderValue={field === 'account' ? renderAccount : renderType}
           className={field === 'type' ? 'sheet-type' : ''}
           onChange={(v) => { if (!done.current) { done.current = true; onCommit(v, 0); } }}

@@ -6,7 +6,7 @@ import { getAuth, signInWithPopup, GoogleAuthProvider, signOut } from 'firebase/
 import SabDekho from './SabDekho';
 
 import { API, MONTHS, BANKS } from '../constants';
-import { getToken, formatDate, fmt, fmtPct } from '../utils';
+import { getToken, formatDate, fmt, fmtPct, getBankEmoji, accountColor, isCcAccount } from '../utils';
 import CustomSelect from '../components/CustomSelect';
 import ReconciliationModal from '../components/ReconciliationModal';
 import { MinBalanceChip, balanceLevel } from '../components/BalanceImpact';
@@ -220,26 +220,24 @@ const [showInvestments, setShowInvestments] = useState(false);
         </div>
         <div className="accounts-grid">
           {accounts
-            .filter(a => a.balance_tracked && a.account !== 'CC-PINNACLE 6360' && a.account !== 'CC-AXIS REWARDS')
+            // Cards' balances aren't tracked, so there's nothing to show for them here.
+            .filter(a => a.balance_tracked && !isCcAccount(a.account))
             .sort((a, b) => {
-              // Sort them strictly by the order defined in the BANKS object
+              // The familiar ones in their usual order, then any added since, alphabetically.
               const orderA = Object.keys(BANKS).indexOf(a.account);
               const orderB = Object.keys(BANKS).indexOf(b.account);
-
-              // If an account isn't in the BANKS list, push it to the very end
               const indexA = orderA === -1 ? 999 : orderA;
               const indexB = orderB === -1 ? 999 : orderB;
-
-              return indexA - indexB;
+              return indexA - indexB || a.account.localeCompare(b.account);
             })
             .map(a => (
               <div
                 className={`account-card ${showBalances && a.min_balance != null ? `floor-${balanceLevel(a.balance || 0, a.min_balance)}` : ''}`}
                 key={a.account}
-                style={{ "--accent": BANKS[a.account]?.color }}
+                style={{ "--accent": accountColor(a.account) }}
               >
                 <div className="acc-top">
-                  <span className="acc-emoji">{BANKS[a.account]?.emoji}</span>
+                  <span className="acc-emoji">{getBankEmoji(a.account)}</span>
                   <span className="acc-name">{a.account}</span>
                 </div>
                 <div className="acc-balance">{showBalances ? fmt(a.balance) : '₹ ••••••'}</div>
@@ -340,7 +338,7 @@ const [showInvestments, setShowInvestments] = useState(false);
               .filter(a => a.balance_tracked) // only show balance-tracked accounts
               .map(a => (
                 <div key={a.account} className="acc-row">
-                  <div className="acc-row-left">{BANKS[a.account]?.emoji} {a.account}</div>
+                  <div className="acc-row-left">{getBankEmoji(a.account)} {a.account}</div>
                   <span className="pos">{money(income[a.account] || 0)}</span>
                 </div>
               ))}
@@ -362,7 +360,7 @@ const [showInvestments, setShowInvestments] = useState(false);
               .filter(a => a.balance_tracked) // only show balance-tracked accounts
               .map(a => (
                 <div key={a.account} className="acc-row">
-                  <div className="acc-row-left">{BANKS[a.account]?.emoji} {a.account}</div>
+                  <div className="acc-row-left">{getBankEmoji(a.account)} {a.account}</div>
                   <span className="neg">{money(expense[a.account] || 0)}</span>
                 </div>
               ))}

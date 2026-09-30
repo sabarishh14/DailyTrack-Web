@@ -5,7 +5,7 @@ import { initializeApp } from 'firebase/app';
 import { getAuth, signInWithPopup, GoogleAuthProvider, signOut } from 'firebase/auth';
 import SabDekho from './pages/SabDekho';
 
-import { API, TABS } from './constants';
+import { API, TABS, SETTINGS_TAB } from './constants';
 import { getToken } from './utils';
 import { auth } from './config/firebase';
 import MemoizedHomeTab from './pages/HomeTab';
@@ -14,6 +14,7 @@ import MemoizedAddTab from './pages/AddTab';
 import MemoizedRoutinesTab from './pages/RoutinesTab';
 import MemoizedInvestTab from './pages/InvestTab';
 import MemoizedSabDekho from './pages/SabDekho';
+import SettingsPage from './pages/SettingsPage';
 import LoginPage from './components/LoginPage';
 import LoadingScreen from './components/LoadingScreen';
 import AccessControlModal from './components/AccessControlModal';
@@ -76,6 +77,7 @@ const [categories, setCategories] = useState([]);
   accessRef.current = access;
   const [authNotice, setAuthNotice] = useState('');
   const visibleTabs = useMemo(() => TABS.filter(t => canOpenTab(access, t.id)), [access]);
+  const searchTabs = useMemo(() => [...visibleTabs, { id: SETTINGS_TAB, icon: '⚙️', label: 'Settings' }], [visibleTabs]);
 
   // 🚀 SECRET DEV MENU STATES
   const [logoClicks, setLogoClicks] = useState(0);
@@ -430,6 +432,30 @@ const today = new Date();
         {tab === 3 && <MemoizedRoutinesTab />}
         {tab === 4 && <MemoizedInvestTab investments={investments} manualAssets={manualAssets} assetList={assetList} onAdd={fetchAll} />}
         {tab === 5 && <MemoizedSabDekho API={API} getToken={getToken} showMovies={showMovies} refreshTrigger={sabDekhoRefresh} />}
+        {tab === SETTINGS_TAB && (
+          <SettingsPage
+            accounts={accounts ?? []}
+            budgets={budgets ?? []}
+            dataVersion={dataVersion}
+            onRefresh={() => fetchAll(false)}
+            refreshBudgets={refreshBudgets}
+            theme={theme}
+            setTheme={setTheme}
+            accent={accent}
+            setAccent={setAccent}
+            showMovies={showMovies}
+            toggleShowMovies={toggleShowMovies}
+            lbxUsername={lbxUsername}
+            setLbxUsername={setLbxUsername}
+            lbxSyncing={lbxSyncing}
+            lbxSyncStatus={lbxSyncStatus}
+            syncLetterboxd={syncLetterboxd}
+            enableNagapandi={enableNagapandi}
+            toggleNagapandi={toggleNagapandi}
+            onOpenAccessControl={() => setIsSecretMenuOpen(true)}
+            logout={logout}
+          />
+        )}
       </>
     );
   };
@@ -473,20 +499,11 @@ const today = new Date();
           isMenuOpen={isMenuOpen}
           setIsMenuOpen={setIsMenuOpen}
           menuRef={menuRef}
-          accent={accent}
-          setAccent={setAccent}
+          email={access.email}
+          roleLabel={access.role.charAt(0).toUpperCase() + access.role.slice(1)}
           isAdmin={isAdmin}
+          onOpenSettings={() => setTab(SETTINGS_TAB)}
           onOpenAccessControl={() => setIsSecretMenuOpen(true)}
-          canSyncLetterboxd={access.can('sabdekho', 'edit')}
-          enableNagapandi={enableNagapandi}
-          toggleNagapandi={toggleNagapandi}
-          showMovies={showMovies}
-          toggleShowMovies={toggleShowMovies}
-          lbxUsername={lbxUsername}
-          setLbxUsername={setLbxUsername}
-          lbxSyncing={lbxSyncing}
-          lbxSyncStatus={lbxSyncStatus}
-          syncLetterboxd={syncLetterboxd}
           logout={logout}
         />
         <main className="page-body">
@@ -502,7 +519,7 @@ const today = new Date();
 
       {/* 🚀 GLOBAL SEARCH UI */}
       <GlobalSearchModal getToken={getToken}
-        tabs={visibleTabs}
+        tabs={searchTabs}
         enableNagapandi={isAdmin && enableNagapandi}
         isOpen={isSearchOpen}
         onClose={() => setIsSearchOpen(false)}

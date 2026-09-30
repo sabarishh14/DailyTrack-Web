@@ -5,8 +5,8 @@ import { initializeApp } from 'firebase/app';
 import { getAuth, signInWithPopup, GoogleAuthProvider, signOut } from 'firebase/auth';
 import SabDekho from './SabDekho';
 
-import { API, BANKS } from '../constants';
-import { getToken, evaluateMath, buildDescriptionIndex, guessDescription, categoriesForType, descriptionOptions } from '../utils';
+import { API } from '../constants';
+import { accountOptions, getToken, evaluateMath, buildDescriptionIndex, guessDescription, categoriesForType, descriptionOptions } from '../utils';
 import { useMoneyMeta, EMPTY_META } from '../api/money';
 import CustomSelect from '../components/CustomSelect';
 import AutocompleteInput from '../components/AutocompleteInput';
@@ -364,7 +364,7 @@ movie_tags: r.movie_tags,
                 <CustomSelect
                   value={row.account}
                   onChange={val => updateRow(row.id, 'account', val)}
-                  options={Object.keys(BANKS).map(b => ({ label: `${BANKS[b]?.emoji} ${b}`, value: b }))}
+                  options={accountOptions([...meta.accounts, row.account])}
                   minWidth="140px"
                 />
 

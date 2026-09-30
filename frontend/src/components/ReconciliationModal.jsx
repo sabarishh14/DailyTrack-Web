@@ -5,8 +5,8 @@ import { initializeApp } from 'firebase/app';
 import { getAuth, signInWithPopup, GoogleAuthProvider, signOut } from 'firebase/auth';
 import SabDekho from '../pages/SabDekho';
 
-import { API, BANKS } from '../constants';
-import { getToken, fmt } from '../utils';
+import { API } from '../constants';
+import { getToken, fmt, getBankEmoji, accountColor } from '../utils';
 
 export default function ReconciliationModal({ accounts, onClose, onRefresh }) {
   const [scanning, setScanning] = useState(false);
@@ -72,9 +72,9 @@ export default function ReconciliationModal({ accounts, onClose, onRefresh }) {
               }
 
               return (
-                <div key={acc.account} className="reconcile-row" style={{ '--accent': BANKS[acc.account]?.color }}>
+                <div key={acc.account} className="reconcile-row" style={{ '--accent': accountColor(acc.account) }}>
                   <div className="reconcile-row-id">
-                    <span className="acc-emoji">{BANKS[acc.account]?.emoji}</span>
+                    <span className="acc-emoji">{getBankEmoji(acc.account)}</span>
                     <div className="reconcile-row-text">
                       <span className="reconcile-account-name">{acc.account}</span>
                       <span className="reconcile-row-figures">

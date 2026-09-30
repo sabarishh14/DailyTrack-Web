@@ -1,13 +1,7 @@
 import { TAB_TITLES } from '../../constants';
 
-const ACCENT_PALETTES = [
-  { id: 'indigo', color: '#6366f1', label: 'Indigo' },
-  { id: 'ocean', color: '#0ea5e9', label: 'Ocean' },
-  { id: 'rose', color: '#f43f5e', label: 'Rose' },
-  { id: 'emerald', color: '#10b981', label: 'Emerald' },
-  { id: 'amber', color: '#f59e0b', label: 'Amber' },
-];
-
+// Everything that used to live in this menu (accent, films, Letterboxd,
+// Nagapandi) is on the Settings page now.
 export default function TopBar({
   tab,
   isRefreshing,
@@ -18,20 +12,11 @@ export default function TopBar({
   isMenuOpen,
   setIsMenuOpen,
   menuRef,
-  accent,
-  setAccent,
+  email,
+  roleLabel,
   isAdmin,
+  onOpenSettings,
   onOpenAccessControl,
-  canSyncLetterboxd,
-  enableNagapandi,
-  toggleNagapandi,
-  showMovies,
-  toggleShowMovies,
-  lbxUsername,
-  setLbxUsername,
-  lbxSyncing,
-  lbxSyncStatus,
-  syncLetterboxd,
   logout,
 }) {
   return (
@@ -78,6 +63,8 @@ export default function TopBar({
         <div ref={menuRef} style={{ position: 'relative' }}>
           <button
             onClick={() => setIsMenuOpen(!isMenuOpen)}
+            aria-label="Menu"
+            aria-expanded={isMenuOpen}
             style={{ background: 'transparent', border: 'none', color: 'var(--text)', cursor: 'pointer', padding: '0.4rem', display: 'flex' }}
           >
             <svg width="26" height="26" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 6h16M4 12h16M4 18h16" /></svg>
@@ -85,94 +72,29 @@ export default function TopBar({
 
           {isMenuOpen && (
             <div className="menu-dropdown">
-              {/* Accent Picker */}
-              <div className="menu-section">
-                <div className="menu-section-title">Accent Color</div>
-                <div className="accent-picker">
-                  {ACCENT_PALETTES.map(p => (
-                    <div
-                      key={p.id}
-                      className={`accent-dot ${accent === p.id ? 'active' : ''}`}
-                      style={{ background: p.color }}
-                      title={p.label}
-                      onClick={() => setAccent(p.id)}
-                    />
-                  ))}
-                </div>
-              </div>
-
-              {/* Admin: Access Control */}
-              {isAdmin && (
-                <div className="menu-section" style={{ borderTop: '1px solid var(--border)', paddingTop: '0.75rem', marginTop: '0.5rem' }}>
-                  <button className="menu-access-btn" onClick={() => { setIsMenuOpen(false); onOpenAccessControl(); }}>
-                    <span className="menu-access-icon">🛡️</span>
-                    <span style={{ flex: 1, textAlign: 'left' }}>
-                      <span style={{ display: 'block', fontWeight: 700 }}>Access Control</span>
-                      <span style={{ display: 'block', fontSize: '0.72rem', color: 'var(--text2)', fontWeight: 500 }}>Who can see and change what</span>
-                    </span>
-                    <span style={{ color: 'var(--text2)' }}>›</span>
-                  </button>
+              {email && (
+                <div className="menu-profile">
+                  <b>{email}</b>
+                  <span>{roleLabel}</span>
                 </div>
               )}
 
-              {/* SabDekho Settings */}
-              <div className="menu-section" style={{ borderTop: '1px solid var(--border)', paddingTop: '0.75rem', marginTop: '0.5rem' }}>
+              <div className="menu-section" style={{ padding: '0.35rem 0' }}>
+                <button className="menu-item" onClick={() => { setIsMenuOpen(false); onOpenSettings(); }}>
+                  <span>⚙️</span> Settings
+                  <span className="menu-item-sub">›</span>
+                </button>
                 {isAdmin && (
-                  <>
-                    <div className="menu-section-title">Features</div>
-
-                    <div className="toggle-container" onClick={toggleNagapandi} style={{ marginTop: '12px', marginBottom: '8px', justifyContent: 'space-between' }}>
-                      <span style={{ color: 'var(--text2)', fontSize: '0.85rem', fontWeight: 600 }}>✨ Nagapandi AI</span>
-                      <div className={`toggle-switch ${enableNagapandi ? 'active' : ''}`}>
-                        <div className="toggle-knob" />
-                      </div>
-                    </div>
-                  </>
-                )}
-
-                <div className="menu-section-title" style={{ marginTop: isAdmin ? '1rem' : 0 }}>SabDekho Settings</div>
-
-                <div className="toggle-container" onClick={toggleShowMovies} style={{ marginTop: '12px', marginBottom: '8px', justifyContent: 'space-between' }}>
-                  <span style={{ color: 'var(--text2)', fontSize: '0.85rem', fontWeight: 600 }}>Movies</span>
-                  <div className={`toggle-switch ${showMovies ? 'active' : ''}`}>
-                    <div className="toggle-knob" />
-                  </div>
-                </div>
-
-                {showMovies && canSyncLetterboxd && (
-                  <div className="lbx-sync-container">
-                    <input
-                      type="text"
-                      className="lbx-input"
-                      value={lbxUsername}
-                      onChange={e => setLbxUsername(e.target.value)}
-                      placeholder="Letterboxd Username"
-                    />
-                    <button className="lbx-btn" onClick={syncLetterboxd} disabled={lbxSyncing}>
-                      {lbxSyncing ? 'Syncing...' : 'Sync RSS'}
-                    </button>
-                    {lbxSyncStatus && (
-                      <div style={{ fontSize: '0.75rem', color: 'var(--text2)', marginTop: '4px', textAlign: 'center' }}>
-                        {lbxSyncStatus}
-                      </div>
-                    )}
-                  </div>
+                  <button className="menu-item" onClick={() => { setIsMenuOpen(false); onOpenAccessControl(); }}>
+                    <span>🛡️</span> Access Control
+                    <span className="menu-item-sub">›</span>
+                  </button>
                 )}
               </div>
 
-              {/* Logout */}
-              <div className="menu-section">
-                <button
-                  onClick={() => { setIsMenuOpen(false); logout(); }}
-                  style={{
-                    width: '100%', background: 'rgba(239, 68, 68, 0.1)',
-                    border: 'none', borderRadius: '8px', padding: '0.6rem 1rem',
-                    color: 'var(--neg)', cursor: 'pointer', fontSize: '0.85rem',
-                    fontWeight: 600, textAlign: 'left', display: 'flex', gap: '8px',
-                    fontFamily: "'DM Sans', sans-serif"
-                  }}
-                >
-                  🚪 Logout
+              <div className="menu-section" style={{ padding: '0.35rem 0 0' }}>
+                <button className="menu-item danger" onClick={() => { setIsMenuOpen(false); logout(); }}>
+                  <span>🚪</span> Log out
                 </button>
               </div>
             </div>

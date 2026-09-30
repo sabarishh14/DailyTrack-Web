@@ -30,4 +30,15 @@ export const TABS = [
   { id: 5, icon: "📺", label: "SabDekho" },
 ];
 
-export const TAB_TITLES = ["Dashboard", "Money", "Add Transaction", "Routines", "Investments", "SabDekho"];
+// Settings (6) isn't a tab in the navigation; it's opened from the sidebar and the menu.
+export const SETTINGS_TAB = 6;
+
+export const TAB_TITLES = ["Dashboard", "Money", "Add Transaction", "Routines", "Investments", "SabDekho", "Settings"];
+
+export const ACCENT_PALETTES = [
+  { id: 'indigo', color: '#6366f1', label: 'Indigo' },
+  { id: 'ocean', color: '#0ea5e9', label: 'Ocean' },
+  { id: 'rose', color: '#f43f5e', label: 'Rose' },
+  { id: 'emerald', color: '#10b981', label: 'Emerald' },
+  { id: 'amber', color: '#f59e0b', label: 'Amber' },
+];

@@ -5,8 +5,8 @@ import { initializeApp } from 'firebase/app';
 import { getAuth, signInWithPopup, GoogleAuthProvider, signOut } from 'firebase/auth';
 import SabDekho from '../pages/SabDekho';
 
-import { API, BANKS } from '../constants';
-import { evaluateMath, getToken, buildDescriptionIndex, categoriesForType, descriptionOptions } from '../utils';
+import { API } from '../constants';
+import { accountOptions, evaluateMath, getToken, buildDescriptionIndex, categoriesForType, descriptionOptions } from '../utils';
 import { useLatestMoneyMeta, EMPTY_META } from '../api/money';
 import CustomSelect from './CustomSelect';
 import AutocompleteInput from './AutocompleteInput';
@@ -80,7 +80,7 @@ export default function EditTransactionModal({ tx, categories, onClose, onRefres
               <CustomSelect
                 value={form.account}
                 onChange={val => updateField('account', val)}
-                options={Object.keys(BANKS).map(b => ({ label: `${BANKS[b]?.emoji} ${b}`, value: b }))}
+                options={accountOptions([...meta.accounts, tx.account])}
                 width="100%"
               />
             </div>

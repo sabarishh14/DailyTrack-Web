@@ -1,4 +1,4 @@
-import { TABS } from '../../constants';
+import { SETTINGS_TAB, TABS } from '../../constants';
 
 export default function Sidebar({
   sidebarWidth,
@@ -74,6 +74,32 @@ export default function Sidebar({
           </button>
         ))}
       </nav>
+      <div className="sidebar-settings">
+        <button
+          className={`nav-item ${tab === SETTINGS_TAB ? 'active' : ''}`}
+          onClick={() => setTab(SETTINGS_TAB)}
+          title={sidebarMinimized ? 'Settings' : ''}
+          style={{
+            justifyContent: sidebarMinimized ? 'center' : 'flex-start',
+            gap: sidebarMinimized ? 0 : '0.75rem',
+            padding: sidebarMinimized ? '0.7rem 0' : '0.7rem 0.85rem',
+            overflow: 'hidden',
+          }}
+        >
+          <span className="nav-icon" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, width: sidebarMinimized ? '100%' : 'auto' }}>⚙️</span>
+          <span className="nav-label" style={{
+            opacity: sidebarMinimized ? 0 : 1,
+            flex: sidebarMinimized ? 'none' : 1,
+            width: sidebarMinimized ? 0 : 'auto',
+            overflow: 'hidden',
+            whiteSpace: 'nowrap',
+            transition: 'opacity 0.2s ease',
+            display: 'block'
+          }}>
+            Settings
+          </span>
+        </button>
+      </div>
       <div className="sidebar-footer" style={{ padding: sidebarMinimized ? '1rem 0' : '1rem 1.5rem', transition: 'padding 0.3s ease', display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
         <button
           onClick={() => setSidebarWidth(sidebarMinimized ? 280 : 70)} // <-- Increased from 250

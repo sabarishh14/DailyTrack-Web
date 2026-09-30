@@ -5,8 +5,8 @@ import { initializeApp } from 'firebase/app';
 import { getAuth, signInWithPopup, GoogleAuthProvider, signOut } from 'firebase/auth';
 import SabDekho from '../pages/SabDekho';
 
-import { API, BANKS } from '../constants';
-import { evaluateMath, getToken, buildDescriptionIndex, categoriesForType, descriptionOptions } from '../utils';
+import { API } from '../constants';
+import { accountOptions, evaluateMath, getToken, buildDescriptionIndex, categoriesForType, descriptionOptions } from '../utils';
 import { useLatestMoneyMeta, EMPTY_META } from '../api/money';
 import CustomSelect from './CustomSelect';
 import AutocompleteInput from './AutocompleteInput';
@@ -87,7 +87,7 @@ export default function BulkEditTransactionModal({ transactions, categories, onC
               <CustomSelect
                 value={row.account}
                 onChange={val => updateRow(row.id, 'account', val)}
-                options={Object.keys(BANKS).map(b => ({ label: `${BANKS[b]?.emoji} ${b}`, value: b }))}
+                options={accountOptions([...meta.accounts, row.account])}
                 minWidth="140px"
               />
               <input type="date" className="bulk-inp" style={{ height: '36px' }} value={row.date} onChange={e => updateRow(row.id, 'date', e.target.value)} />
