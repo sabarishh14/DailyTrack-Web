@@ -17,6 +17,20 @@ export const storeAccess = (access) => {
   } catch { /* storage unavailable: access is re-fetched on load anyway */ }
 };
 
+// What one person leaves in this browser that the next person mustn't inherit.
+const PERSONAL_KEYS = ['dt_draft_txs', 'dt_inv_pin', 'dt_inv_hidden_cats', 'dt_lbx_username'];
+const LAST_USER_KEY = 'dt_last_user';
+
+/** Once the signed-in email is known: someone other than last time starts clean. */
+export const claimBrowserFor = (email) => {
+  if (!email) return;
+  try {
+    const last = localStorage.getItem(LAST_USER_KEY);
+    if (last && last !== email) PERSONAL_KEYS.forEach(k => localStorage.removeItem(k));
+    localStorage.setItem(LAST_USER_KEY, email);
+  } catch { /* storage unavailable: nothing was kept either */ }
+};
+
 export const buildAccess = (raw) => {
   const a = raw || {};
   const modules = a.modules || {};

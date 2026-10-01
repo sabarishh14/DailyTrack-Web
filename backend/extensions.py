@@ -19,7 +19,10 @@ firebase_admin.initialize_app(firebase_cred)
 ALLOWED_EMAILS = {e.strip().lower() for e in os.getenv("ALLOWED_EMAILS", "").split(",") if e.strip()}
 
 # Permanent super admins. They can never be removed or demoted from the admin UI.
-OWNER_EMAILS = {e.strip().lower() for e in os.getenv("OWNER_EMAILS", "sbsabarish14@gmail.com").split(",") if e.strip()}
+_OWNER_LIST = [e.strip().lower() for e in os.getenv("OWNER_EMAILS", "sbsabarish14@gmail.com").split(",") if e.strip()]
+OWNER_EMAILS = set(_OWNER_LIST)
+# Whose data scripts using the API key work on: the first owner listed.
+PRIMARY_OWNER = _OWNER_LIST[0] if _OWNER_LIST else None
 
 # Load environment variables with validation
 API_SECRET_KEY = os.getenv("API_SECRET_KEY")

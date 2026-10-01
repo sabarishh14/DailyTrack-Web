@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { API } from '../../constants';
 import {
   fmt, getToken, evaluateMath, balanceDelta, isCcAccount,
-  buildDescriptionIndex, categoriesForType, descriptionOptions,
+  buildDescriptionIndex, categoriesForType, descriptionOptions, defaultAccount,
 } from '../../utils';
 import { useAccountOptions, useLatestMoneyMeta, EMPTY_META } from '../../api/money';
 import {
@@ -21,7 +21,7 @@ export default function SheetEntryRow({ gridColumns, tableMinWidth, withBalances
 
   const blank = (prev) => ({
     date: prev?.date || today(),
-    account: prev?.account || 'KOTAK',
+    account: prev?.account || defaultAccount(accounts),
     type: prev?.type || 'Debit',
     amount: '',
     heading: '',

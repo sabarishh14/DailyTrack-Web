@@ -23,12 +23,15 @@ export const accountColor = (name) => BANKS[name]?.color || (isCcAccount(name) ?
  */
 export function accountOptions(names) {
   const known = Object.keys(BANKS);
-  const list = (names || []).filter(Boolean);
   const rank = (n) => { const i = known.indexOf(n); return i === -1 ? known.length : i; };
-  return [...new Set(list.length ? list : known)]
+  return [...new Set((names || []).filter(Boolean))]
     .sort((a, b) => rank(a) - rank(b) || a.localeCompare(b))
     .map(n => ({ value: n, label: `${getBankEmoji(n)} ${n}` }));
 }
+
+/** The account new entries start on: the first of the person's own, or none yet. */
+export const defaultAccount = (accounts) =>
+  accountOptions((accounts || []).map(a => (typeof a === 'string' ? a : a?.account)))[0]?.value || '';
 
 export function fmt(n) {
   if (n === undefined || n === null || isNaN(n)) return "₹0";

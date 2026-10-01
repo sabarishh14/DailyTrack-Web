@@ -14,10 +14,11 @@ from extensions import (
     KITE_API_KEY, KITE_API_SECRET, TMDB_API_KEY,
 )
 from models import *
-from access import require_api_key, require_admin, require_access, current_access
+from access import require_api_key, require_admin, require_access, current_access, owner_only
+from tenancy import data_owner
 
 from push import send_low_balance_alert
-from blueprints.media import invalidate_stats_cache, _perform_rss_sync_generator, fetch_tmdb_movie_details
+from blueprints.media import invalidate_stats_cache, _perform_rss_sync_generator, fetch_tmdb_movie_details, letterboxd_username
 
 money_bp = Blueprint("money", __name__)
 
@@ -50,14 +51,30 @@ def _invalid_types(items):
     return jsonify({"success": False, "code": "INVALID_TYPE",
                     "message": f"Unknown transaction type: {', '.join(bad)}. Use one of {', '.join(TX_TYPES)}."}), 400
 
+def own_account(name):
+    """The signed-in person's account called name, or None. session.get reuses one
+    already loaded in this request, so a batch touching one account doesn't
+    re-select it for every transaction."""
+    if not name:
+        return None
+    return db.session.get(Account, {"owner_email": data_owner(), "account": name})
+
+def new_transaction_ids(count):
+    """Ids for count new transactions: epoch milliseconds like before (they order
+    entries within a day), moved past any already taken, since ids are shared by
+    everyone and two people can save in the same millisecond."""
+    now = int(datetime.now().timestamp() * 1000)
+    taken = (db.session.query(db.func.max(Transaction.id)).filter(Transaction.id >= now)
+             .execution_options(all_owners=True).scalar())
+    start = max(now, (taken or 0) + 1)
+    return list(range(start, start + count))
+
 def apply_balance(account_name, tx_type, amount, undo=False):
     """Move a tracked account's balance for one transaction: Credit adds, every
     other type takes money out. undo=True reverses an earlier application."""
     if is_cc_account(account_name):
         return
-    # session.get reuses an account already loaded in this request, so a batch
-    # touching one account doesn't re-select it for every transaction.
-    account = db.session.get(Account, account_name) if account_name else None
+    account = own_account(account_name)
     if not account or not account.balance_tracked:
         return
     delta = float(amount) if normalize_tx_type(tx_type) == "Credit" else -float(amount)
@@ -106,6 +123,15 @@ def _need_full_money():
     if not current_access().full_money_edit:
         return jsonify({"success": False, "code": "FORBIDDEN", "message": "This needs edit access to all money data"}), 403
     return None
+def _unknown_accounts(names):
+    """A 400 when any of names isn't one of the person's own accounts, else None."""
+    names = {n for n in names if n}
+    own = {a for (a,) in db.session.query(Account.account).filter(Account.account.in_(names)).all()} if names else set()
+    unknown = sorted(names - own)
+    if unknown:
+        return jsonify({"success": False, "code": "UNKNOWN_ACCOUNT",
+                        "message": f"No account called {', '.join(unknown)}"}), 400
+    return None
 def _out_of_scope():
     return jsonify({"success": False, "code": "FORBIDDEN", "message": "That category or account is outside your access"}), 403
 def get_transactions_for_sync():
@@ -128,7 +154,7 @@ def get_transactions_for_sync():
 @money_bp.route('/api/sync/check-transactions', methods=['GET'])
 @require_access("money")
 def check_tx_sync():
-    denied = _need_full_money()
+    denied = owner_only()
     if denied: return denied
     try:
         # Just count how many are waiting
@@ -139,7 +165,7 @@ def check_tx_sync():
 @money_bp.route('/api/sync/db-to-sheets', methods=['POST'])
 @require_access("money")
 def sync_db_to_sheets():
-    denied = _need_full_money()
+    denied = owner_only()
     if denied: return denied
     try:
         BATCH_SIZE = 5
@@ -256,6 +282,16 @@ def register_device():
     db.session.execute(stmt)
     db.session.commit()
     return jsonify({"success": True, "registered": True})
+
+@money_bp.route('/api/devices/unregister', methods=['POST'])
+@require_api_key
+def unregister_device():
+    """A phone signing out: its alerts stop until someone signs in on it again."""
+    token = str((request.json or {}).get('token') or '').strip()
+    if token:
+        DeviceToken.query.filter_by(token=token, email=current_access().email).delete()
+        db.session.commit()
+    return jsonify({"success": True})
 
 @money_bp.route('/api/accounts', methods=['PUT'])
 @require_access("money")
@@ -564,7 +600,7 @@ def add_transaction():
         access = current_access()
         if any(not access.tx_allowed(item.get('heading'), item.get('account')) for item in transactions_data):
             return _out_of_scope()
-        invalid = _invalid_types(transactions_data)
+        invalid = _invalid_types(transactions_data) or _unknown_accounts(item.get('account') for item in transactions_data)
         if invalid: return invalid
         # Cinema entries also write to SabDekho, so only link them for users who may.
         can_link_movies = access.can("sabdekho", "edit")
@@ -581,7 +617,8 @@ def add_transaction():
         
         # --- NEW: Perform a preemptive RSS sync if any transaction is a Cinema transaction
         # so that recent Letterboxd logs are in the DB before we append tags to them.
-        lbx_username = next((item.get('lbx_username') for item in transactions_data if item.get('heading', '').strip().lower() == 'cinema' and item.get('lbx_username')), None) if can_link_movies else None
+        has_cinema = any(item.get('heading', '').strip().lower() == 'cinema' for item in transactions_data)
+        lbx_username = letterboxd_username() if can_link_movies and has_cinema else None
         if lbx_username:
             try:
                 # Silently consume the generator to execute the sync in fast mode
@@ -592,6 +629,7 @@ def add_transaction():
 
         balances_before = (_balance_snapshot({item['account'] for item in transactions_data})
                            if access.balances_visible else {})
+        tx_ids = new_transaction_ids(len(transactions_data))
 
         for item in transactions_data:
             date_obj = datetime.strptime(item['date'], '%Y-%m-%d')
@@ -602,7 +640,7 @@ def add_transaction():
             acc_name = item['account']
             
             new_tx = Transaction(
-                id=int(datetime.now().timestamp() * 1000) + added_count,
+                id=tx_ids[added_count],
                 account=acc_name,
                 date=date_obj,
                 month=month_obj,
@@ -700,7 +738,7 @@ def add_transaction():
         balance_changes = _balance_changes(balances_before)
         db.session.commit()
         invalidate_stats_cache()
-        send_low_balance_alert(balance_changes)
+        send_low_balance_alert(balance_changes, data_owner())
         
         msg = f"Successfully added {added_count} transactions & updated balances!"
         if 'movie_link_successes' in locals() and movie_link_successes:
@@ -717,6 +755,8 @@ def add_transaction():
 @money_bp.route('/api/sync/ocr-split', methods=['POST'])
 @require_access("money")
 def sync_ocr_split():
+    denied = owner_only()
+    if denied: return denied
     try:
         # No link required anymore, API.gs will fetch the latest image from the folder
         payload = {"type": "ocr_split"}
@@ -793,7 +833,9 @@ def save_split():
         if not transaction_id or total_amount is None:
             return jsonify({"success": False, "message": "transaction_id and total_amount required"}), 400
         scoped_tx = Transaction.query.get(transaction_id)
-        if scoped_tx and not current_access().tx_allowed(scoped_tx.heading, scoped_tx.account):
+        if not scoped_tx:
+            return jsonify({"success": False, "message": "Transaction not found"}), 404
+        if not current_access().tx_allowed(scoped_tx.heading, scoped_tx.account):
             return _out_of_scope()
             
         split = Split.query.filter_by(transaction_id=transaction_id).first()
@@ -836,7 +878,7 @@ def delete_split(transaction_id):
 @money_bp.route('/api/sync/ocr-balances', methods=['POST'])
 @require_access("money")
 def sync_ocr_balances():
-    denied = _need_full_money()
+    denied = owner_only()
     if denied: return denied
     try:
         # Trigger GAS to process images
@@ -899,7 +941,7 @@ def edit_transaction(tid):
             return jsonify({"success": False, "message": "Transaction not found"}), 404
         if not access.tx_allowed(data['heading'], data['account']):
             return _out_of_scope()
-        invalid = _invalid_types([data])
+        invalid = _invalid_types([data]) or _unknown_accounts([data.get('account')])
         if invalid: return invalid
         new_type = normalize_tx_type(data['type'])
 
@@ -957,7 +999,7 @@ def bulk_edit_transactions():
             old = by_id.get(data.get('id'))
             if (old and not access.tx_allowed(old.heading, old.account)) or not access.tx_allowed(data.get('heading'), data.get('account')):
                 return _out_of_scope()
-        invalid = _invalid_types(updates)
+        invalid = _invalid_types(updates) or _unknown_accounts(u.get('account') for u in updates)
         if invalid: return invalid
 
         for data in updates:

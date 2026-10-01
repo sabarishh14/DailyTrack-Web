@@ -12,6 +12,7 @@ from extensions import (
 )
 from models import *
 from access import require_api_key, require_admin, require_access, current_access
+from tenancy import data_owner
 
 from sqlalchemy.orm import joinedload
 import xml.etree.ElementTree as ET
@@ -455,6 +456,8 @@ def add_tv_diary():
     
     if not tv_show_id:
         return jsonify({"success": False, "message": "tv_show_id is required"}), 400
+    if not TvShow.query.get(tv_show_id):
+        return jsonify({"success": False, "message": "Show not found"}), 404
         
     log_date_str = data.get('date')
     log_date = datetime.strptime(log_date_str, "%Y-%m-%d").date() if log_date_str else date.today()
@@ -636,7 +639,8 @@ def get_tv_stats():
     year_param = request.args.get('year', str(_ist_today().year))
 
     fingerprint = _stats_fingerprint(_TV_STATS_FINGERPRINT_SQL)
-    cached = _tv_stats_cache.get(year_param)
+    cache_key = (data_owner(), year_param)
+    cached = _tv_stats_cache.get(cache_key)
     if fingerprint and cached and cached[0] == fingerprint:
         return jsonify(cached[1])
 
@@ -898,7 +902,7 @@ def get_tv_stats():
         }
 
         if fingerprint:
-            _tv_stats_cache[year_param] = (fingerprint, result)
+            _tv_stats_cache[cache_key] = (fingerprint, result)
 
         return jsonify(result)
     except Exception as e:
@@ -982,10 +986,10 @@ _MOVIE_STATS_FINGERPRINT_SQL = """
 SELECT
   (SELECT md5(coalesce(string_agg(
       concat_ws('|', id, movie_id, date, rating, liked, rewatch, md5(coalesce(review, '')), tags),
-      ',' ORDER BY id), '')) FROM movie_diary_logs)
+      ',' ORDER BY id), '')) FROM movie_diary_logs WHERE owner_email = :owner)
   || (SELECT md5(coalesce(string_agg(
       concat_ws('|', id, tmdb_id, name, poster_path, runtime, release_year, release_date, language),
-      ',' ORDER BY id), '')) FROM movies)
+      ',' ORDER BY id), '')) FROM movies WHERE owner_email = :owner)
 """
 
 _TV_STATS_FINGERPRINT_SQL = """
@@ -993,20 +997,20 @@ SELECT
   (SELECT md5(coalesce(string_agg(
       concat_ws('|', id, tv_show_id, season_number, episode_number, date, rating, liked, rewatch,
                 md5(coalesce(review, '')), tags),
-      ',' ORDER BY id), '')) FROM tv_diary_logs)
+      ',' ORDER BY id), '')) FROM tv_diary_logs WHERE owner_email = :owner)
   || (SELECT md5(coalesce(string_agg(
       concat_ws('|', id, tmdb_id, name, poster_path, status, watched_episodes::text, language),
-      ',' ORDER BY id), '')) FROM tv_shows)
+      ',' ORDER BY id), '')) FROM tv_shows WHERE owner_email = :owner)
   || (SELECT md5(coalesce(string_agg(
       concat_ws('|', id, tv_show_id, action, created_at),
-      ',' ORDER BY id), '')) FROM tv_activity_logs)
+      ',' ORDER BY id), '')) FROM tv_activity_logs WHERE owner_email = :owner)
 """
 
 
 def _stats_fingerprint(sql):
-    """Fingerprint of the rows a stats payload depends on, or None if unavailable."""
+    """Fingerprint of the signed-in person's rows a stats payload depends on, or None if unavailable."""
     try:
-        return db.session.execute(sql_text(sql)).scalar()
+        return db.session.execute(sql_text(sql), {"owner": data_owner()}).scalar()
     except Exception as e:
         db.session.rollback()
         print(f"Stats fingerprint unavailable, serving uncached: {e}")
@@ -1015,11 +1019,13 @@ def _stats_fingerprint(sql):
 
 def invalidate_stats_cache():
     """
-    Drop this worker's cached stats straight away after a write it handled.
-    Other workers notice the change through the fingerprint check.
+    Drop this worker's cached stats for the signed-in person straight away after
+    a write it handled. Other workers notice the change through the fingerprint check.
     """
-    _stats_cache.clear()
-    _tv_stats_cache.clear()
+    owner = data_owner()
+    for cache in (_stats_cache, _tv_stats_cache):
+        for key in [k for k in cache if owner is None or k[0] == owner]:
+            cache.pop(key, None)
 
 @media_bp.route('/api/movies/stats', methods=['GET'])
 @require_access("sabdekho")
@@ -1029,7 +1035,8 @@ def get_movie_stats():
     year_param = request.args.get('year', str(_ist_today().year))
 
     fingerprint = _stats_fingerprint(_MOVIE_STATS_FINGERPRINT_SQL)
-    cached = _stats_cache.get(year_param)
+    cache_key = (data_owner(), year_param)
+    cached = _stats_cache.get(cache_key)
     if fingerprint and cached and cached[0] == fingerprint:
         return jsonify(cached[1])
     
@@ -1377,7 +1384,7 @@ def get_movie_stats():
         }
         
         if fingerprint:
-            _stats_cache[year_param] = (fingerprint, result)
+            _stats_cache[cache_key] = (fingerprint, result)
         
         return jsonify(result)
     except Exception as e:
@@ -1589,6 +1596,8 @@ def add_movie_diary():
     movie_id = data.get('movie_id') or data.get('tv_show_id') # keeping tv_show_id property name for frontend compatibility
     if not movie_id:
         return jsonify({"success": False, "message": "movie_id is required"}), 400
+    if not Movie.query.get(movie_id):
+        return jsonify({"success": False, "message": "Movie not found"}), 404
     log_date_str = data.get('date')
     log_date = datetime.strptime(log_date_str, "%Y-%m-%d").date() if log_date_str else date.today()
     new_log = MovieDiaryLog(
@@ -1832,15 +1841,43 @@ def _perform_rss_sync_generator(username, fast_mode=False):
         print("RSS SYNC ERROR", repr(e))
         yield json.dumps({"success": False, "message": str(e)}) + "\n"
 
+LETTERBOXD_NAME = re.compile(r"^[A-Za-z0-9_-]{1,40}$")
+
+
+def letterboxd_username():
+    """The signed-in person's Letterboxd username, or None."""
+    owner = data_owner()
+    row = db.session.get(UserSettings, owner) if owner else None
+    return (row.letterboxd_username or None) if row else None
+
+
+def save_letterboxd_username(username):
+    """Remember (or with a blank, forget) the signed-in person's Letterboxd username."""
+    owner = data_owner()
+    if not owner:
+        return
+    row = db.session.get(UserSettings, owner)
+    if row is None:
+        row = UserSettings(email=owner)
+        db.session.add(row)
+    row.letterboxd_username = (username or "").strip() or None
+    db.session.commit()
+
+
 @media_bp.route('/api/movies/sync/rss', methods=['POST'])
 @require_access("sabdekho")
 def sync_letterboxd_rss():
-    data = request.json
-    username = data.get('username')
+    data = request.json or {}
+    username = (data.get('username') or '').strip() or letterboxd_username()
     if not username:
         return jsonify({"success": False, "message": "Username required"}), 400
+    if not LETTERBOXD_NAME.match(username):
+        return jsonify({"success": False, "message": "That isn't a Letterboxd username"}), 400
     if not TMDB_API_KEY:
         return jsonify({"success": False, "message": "TMDB API Key missing on server"}), 500
+    # Syncing a username makes it this person's, for later syncs and cinema spends.
+    if username != letterboxd_username():
+        save_letterboxd_username(username)
 
     return Response(stream_with_context(_perform_rss_sync_generator(username)), mimetype='application/x-ndjson')
 

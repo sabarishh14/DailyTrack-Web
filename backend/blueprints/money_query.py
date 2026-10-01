@@ -27,8 +27,9 @@ from sqlalchemy import func, extract, or_, case, literal, String, cast, text as 
 
 from extensions import db, SHEETS_URL
 from models import Transaction, Split, Account, BalanceAdjustment
-from access import require_access, current_access
+from access import require_access, current_access, owner_only
 from blueprints.money import set_balance
+from tenancy import data_owner
 
 money_query_bp = Blueprint("money_query", __name__)
 
@@ -157,20 +158,21 @@ def balances_after(rows):
 
 
 # /money/meta scans the whole ledger seven ways and runs on every Money load and
-# after every write. Cache it per access scope, alongside a fingerprint of the
-# columns it reads: one cheap aggregate per request instead of seven scans, and
-# correct on every gunicorn worker (and for writes made outside the API).
+# after every write. Cache it per person and access scope, alongside a
+# fingerprint of the columns it reads: one cheap aggregate per request instead of
+# seven scans, and correct on every gunicorn worker (and for writes made outside
+# the API).
 _meta_cache = {}
 _META_FINGERPRINT_SQL = sql_text("""
 SELECT md5(coalesce(string_agg(
   concat_ws('|', id, account, type, heading, md5(coalesce(description, '')), round(amount), month, date, exclude_analytics),
-  ',' ORDER BY id), '')) FROM transactions
+  ',' ORDER BY id), '')) FROM transactions WHERE owner_email = :owner
 """)
 
 
 def _meta_fingerprint():
     try:
-        return db.session.execute(_META_FINGERPRINT_SQL).scalar()
+        return db.session.execute(_META_FINGERPRINT_SQL, {"owner": data_owner()}).scalar()
     except Exception as e:
         db.session.rollback()
         print(f"Money meta fingerprint unavailable, serving uncached: {e}")
@@ -192,7 +194,8 @@ def _with_every_account(tx_accounts):
 def money_meta():
     """Filter options, auto-excluded categories and description suggestions."""
     access = current_access()
-    scope = (tuple(sorted(access.categories)) if access.categories is not None else None,
+    scope = (data_owner(),
+             tuple(sorted(access.categories)) if access.categories is not None else None,
              tuple(sorted(access.accounts)) if access.accounts is not None else None)
     fingerprint = _meta_fingerprint()
     cached = _meta_cache.get(scope)
@@ -373,8 +376,9 @@ def list_splits():
 def sync_sheet_balances():
     """Pull account balances from the Sheet. Replaces the browser calling the
     Apps Script URL directly, which exposed it in the frontend bundle."""
-    if not current_access().full_money_edit:
-        return jsonify({"success": False, "code": "FORBIDDEN", "message": "This needs edit access to all money data"}), 403
+    denied = owner_only()
+    if denied:
+        return denied
     try:
         data = requests.get(SHEETS_URL, timeout=30).json()
         if not isinstance(data, dict) or "error" in data:

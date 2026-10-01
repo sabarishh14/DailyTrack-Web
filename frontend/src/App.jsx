@@ -18,7 +18,7 @@ import SettingsPage from './pages/SettingsPage';
 import LoginPage from './components/LoginPage';
 import LoadingScreen from './components/LoadingScreen';
 import AccessControlModal from './components/AccessControlModal';
-import { AccessProvider, buildAccess, loadStoredAccess, storeAccess, canOpenTab } from './access/AccessContext';
+import { AccessProvider, buildAccess, loadStoredAccess, storeAccess, canOpenTab, claimBrowserFor } from './access/AccessContext';
 import GlobalSearchModal from './components/GlobalSearchModal';
 import EditTransactionModal from './components/EditTransactionModal';
 import FloatingChatWidget from './components/FloatingChatWidget';
@@ -141,7 +141,8 @@ const [categories, setCategories] = useState([]);
     setEnableNagapandi(val);
     localStorage.setItem('dt_enable_nagapandi', val);
   };
-  const [lbxUsername, setLbxUsername] = useState(localStorage.getItem('dt_lbx_username') || 'sabarishh14');
+  // Each person's own, kept on the server (loaded with /auth/me).
+  const [lbxUsername, setLbxUsername] = useState('');
   const [lbxSyncing, setLbxSyncing] = useState(false);
   const [lbxSyncStatus, setLbxSyncStatus] = useState('');
   const [sabDekhoRefresh, setSabDekhoRefresh] = useState(0);
@@ -156,7 +157,6 @@ const [categories, setCategories] = useState([]);
     if (!lbxUsername) return alert("Please enter Letterboxd username");
     setLbxSyncing(true);
     setLbxSyncStatus('Syncing...');
-    localStorage.setItem('dt_lbx_username', lbxUsername);
     try {
       const response = await fetch(`${API}/movies/sync/rss`, {
         method: 'POST',
@@ -358,8 +358,10 @@ setAccounts([]);
       if (showLoading) addLog("Authenticating & checking access...");
       const [me] = await Promise.all([fetchWithCheck(`${API}/auth/me`, 'Access'), cron]);
       const acl = buildAccess(me.access);
+      claimBrowserFor(acl.email);
       setAccessRaw(me.access);
       storeAccess(me.access);
+      if (showLoading) setLbxUsername(me.settings?.letterboxd_username || '');
 
       if (showLoading) addLog("Connecting to LifeTrack database...");
 
@@ -520,7 +522,7 @@ const today = new Date();
       {/* 🚀 GLOBAL SEARCH UI */}
       <GlobalSearchModal getToken={getToken}
         tabs={searchTabs}
-        enableNagapandi={isAdmin && enableNagapandi}
+        enableNagapandi={access.isOwner && enableNagapandi}
         isOpen={isSearchOpen}
         onClose={() => setIsSearchOpen(false)}
         canSearchMoney={access.can('money')}
@@ -543,7 +545,7 @@ onNavigate={(id) => setTab(id)}
         />
       )}
 
-      {isAdmin && enableNagapandi && <FloatingChatWidget getToken={getToken} />}
+      {access.isOwner && enableNagapandi && <FloatingChatWidget getToken={getToken} />}
       {/* 📱 Mobile Bottom Navigation */}
       <MobileBottomNav tabs={visibleTabs} tab={tab} setTab={setTab} handleLogoClick={handleLogoClick} />
     </div>

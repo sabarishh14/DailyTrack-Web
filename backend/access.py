@@ -1,15 +1,19 @@
-"""Role-based access control: who may see and change what.
+"""Who may sign in, and what they may do.
 
 See ACCESS_CONTROL.md at the repo root for the full model. In short:
 
-  role   owner   - permanent super admin(s) from OWNER_EMAILS, can never be removed
-         admin   - full access to everything, manages users, can use Nagapandi AI
-         member  - per-module levels + an optional money scope
+  Everyone signed in has their own, separate data and full use of it. Every query
+  on personal tables is limited to the request's data owner (tenancy.py).
 
-  levels none < view < edit   (edit = add, change and delete)
+  role   owner   - permanent, from OWNER_EMAILS; also the only one with the
+                   features wired to the owner's own accounts (Google Sheets,
+                   Drive OCR, Kite, Nagapandi)
+         admin   - manages who can sign in; sees nobody else's data
+         member  - everyone else
 
-  money scope   categories / accounts allow-lists (None = everything). Every
-                transaction query, total and budget is filtered through it.
+  levels none < view < edit, and the money scope (categories / accounts
+  allow-lists), describe what someone may do with the data they're looking at.
+  For their own data that's everything.
 
 Every request re-checks the user against the allow-list (through a short
 per-worker cache), so removing an email logs that person out everywhere
@@ -22,7 +26,7 @@ import jwt
 from flask import request, jsonify, g
 from sqlalchemy import func, text
 
-from extensions import db, API_SECRET_KEY, JWT_SECRET, ALLOWED_EMAILS, OWNER_EMAILS
+from extensions import db, API_SECRET_KEY, JWT_SECRET, ALLOWED_EMAILS, OWNER_EMAILS, PRIMARY_OWNER
 from models import AllowedEmail, Transaction
 
 MODULES = ("money", "gym", "invest", "sabdekho")
@@ -67,6 +71,9 @@ class Access:
     def __init__(self, email, role, permissions=None):
         self.email = email
         self.role = role  # owner | admin | member | service
+        # Whose data requests read and write: your own. Scripts using the API key
+        # work on the first owner's.
+        self.data_owner = PRIMARY_OWNER if role == "service" else email
         perms = normalize_permissions(permissions if permissions is not None else FULL_EDIT_PERMISSIONS)
         self.modules = perms["modules"]
         self.categories = perms["money_scope"]["categories"]
@@ -179,11 +186,10 @@ def _load_access(email):
     ensure_access_schema()
     row = AllowedEmail.query.filter(func.lower(AllowedEmail.email) == email).first()
     if row is not None:
-        if row.role is None:
-            return Access(email, "member", FULL_EDIT_PERMISSIONS)
-        return Access(email, row.role if row.role in ROLES else "member", row.permissions or {})
+        # Everyone works on their own data, with full use of it.
+        return Access(email, row.role if row.role in ROLES else "member", FULL_EDIT_PERMISSIONS)
     if email in ALLOWED_EMAILS:
-        # .env fallback list: legacy full access, managed outside the admin UI.
+        # .env fallback list, managed outside the admin UI.
         return Access(email, "member", FULL_EDIT_PERMISSIONS)
     return None
 
@@ -212,6 +218,7 @@ def _authenticate():
     api_key = request.headers.get("X-API-KEY")
     if api_key and api_key == API_SECRET_KEY:
         g.access = SERVICE_ACCESS
+        g.data_owner = SERVICE_ACCESS.data_owner
         return None
 
     auth_header = request.headers.get("Authorization", "")
@@ -228,11 +235,35 @@ def _authenticate():
     if access is None:
         return jsonify({"success": False, "code": "ACCESS_REVOKED", "message": "Your access has been revoked"}), 401
     g.access = access
+    g.data_owner = access.data_owner
     return None
 
 
 def _forbidden(message="You don't have permission to do that"):
     return jsonify({"success": False, "code": "FORBIDDEN", "message": message}), 403
+
+
+def owner_only():
+    """Google Sheets, Drive OCR and Kite are wired to the owner's own accounts.
+    Returns a 403 response for anyone else, or None."""
+    if not current_access().is_owner:
+        return _forbidden("Only the app's owner can use this")
+    return None
+
+
+def require_owner(f):
+    """Signed in as the owner (or the owner's scripts)."""
+    @wraps(f)
+    def decorated_function(*args, **kwargs):
+        if request.method == "OPTIONS":
+            return "", 200
+        err = _authenticate()
+        if err:
+            return err
+        if not g.access.is_owner:
+            return _forbidden("Only the app's owner can use this")
+        return f(*args, **kwargs)
+    return decorated_function
 
 
 def require_api_key(f):

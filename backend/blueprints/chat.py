@@ -11,7 +11,8 @@ from extensions import (
     KITE_API_KEY, KITE_API_SECRET, TMDB_API_KEY,
 )
 from models import *
-from access import require_api_key, require_admin, require_access, current_access
+from access import require_api_key, require_admin, require_access, require_owner, current_access
+from tenancy import data_owner
 
 from google import genai
 from sqlalchemy import text
@@ -24,9 +25,13 @@ chat_bp = Blueprint("chat", __name__)
 # Routines are personal, so they're never queried directly: Nagapandi is handed
 # the asking person's own, worked out (see _routines_rule).
 CHAT_BLOCKED = re.compile(
-    r"\b(pg_\w*|information_schema|allowed_emails|accounts|budgets|splits|sync_log|routines|routine_\w+)\b",
+    r"\b(pg_\w*|information_schema|allowed_emails|user_settings|device_tokens|accounts|budgets|splits|sync_log|routines|routine_\w+)\b",
     re.IGNORECASE,
 )
+# Naming a schema ("public.transactions") is the one way past _owner_rows_only.
+SCHEMA_QUALIFIED = re.compile(r'(\bpublic|"public")\s*\.', re.IGNORECASE)
+# Every personal table: queries only ever see the asking person's rows of them.
+OWNED_TABLES = sorted(m.class_.__tablename__ for m in db.Model.registry.mappers if issubclass(m.class_, Owned))
 IST = pytz.timezone("Asia/Kolkata")
 
 
@@ -50,25 +55,37 @@ def _validate_generated_sql(sql):
         return None, "Nagapandi can only run read-only queries."
     if ";" in sql:
         return None, "Nagapandi can only run a single query."
-    if CHAT_BLOCKED.search(sql):
+    if CHAT_BLOCKED.search(sql) or SCHEMA_QUALIFIED.search(sql):
         return None, "Nagapandi can't look at that data."
     return sql, None
 
 
-def _run_readonly(sql):
+def _owner_rows_only(sql):
+    """The model's query with every personal table narrowed to the owner's rows.
+    Each table is shadowed by a CTE of the same name, which unqualified names
+    resolve to first; Postgres inlines them, so nothing extra is scanned."""
+    ctes = ", ".join(f"{t} AS (SELECT * FROM public.{t} WHERE owner_email = :owner)" for t in OWNED_TABLES)
+    head = re.match(r"^with\s+(recursive\s+)?", sql, re.IGNORECASE)
+    if head:
+        return f"WITH {head.group(1) or ''}{ctes}, {sql[head.end():]}"
+    return f"WITH {ctes} {sql}"
+
+
+def _run_readonly(sql, owner):
     """Run model-written SQL where Postgres itself forbids writes, on its own
-    connection so a bad query can never touch the request's session."""
+    connection so a bad query can never touch the request's session, and over
+    the owner's rows only."""
     with db.engine.connect() as conn:
         trans = conn.begin()
         try:
             conn.execute(text("SET TRANSACTION READ ONLY"))
             conn.execute(text("SET LOCAL statement_timeout = '5s'"))
-            return conn.execute(text(sql)).fetchall()
+            return conn.execute(text(_owner_rows_only(sql)), {"owner": owner}).fetchall()
         finally:
             trans.rollback()
 
 @chat_bp.route('/api/chat', methods=['POST'])
-@require_admin
+@require_owner
 def handle_chat_query():
     data = request.json
     user_query = data.get('query')
@@ -140,7 +157,7 @@ def handle_chat_query():
         if error:
             return jsonify({"success": False, "message": error})
 
-        rows = _run_readonly(sql_query)
+        rows = _run_readonly(sql_query, data_owner())
         db_result = str([dict(row._mapping) for row in rows])[:2000] # Cap size
         
         prompt2 = f'''

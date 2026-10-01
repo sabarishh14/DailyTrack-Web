@@ -9,6 +9,7 @@ import { API, MONTHS, BANKS } from '../constants';
 import { getToken, formatDate, fmt, fmtPct, getBankEmoji, accountColor, isCcAccount } from '../utils';
 import CustomSelect from '../components/CustomSelect';
 import ReconciliationModal from '../components/ReconciliationModal';
+import FirstAccountPrompt from '../components/FirstAccountPrompt';
 import { MinBalanceChip, balanceLevel } from '../components/BalanceImpact';
 import { useAccess } from '../access/AccessContext';
 import RoutinesHomeCard from './routines-components/RoutinesHomeCard';
@@ -22,6 +23,9 @@ function HomeTab({ accounts = [], investments = [], budgets, onRefresh, dataVers
   const canInvest = access.can('invest');
   const showBalancesSection = access.money.balancesVisible;
   const fullMoney = access.money.fullAccess;
+  // Empty sections stay hidden until there's something to show in them.
+  const hasMoney = accounts.length > 0;
+  const hasInvestments = (investments || []).length > 0;
   const [isReconcileOpen, setIsReconcileOpen] = useState(false);
   const [moneyMonth, setMoneyMonth] = useState(new Date().getMonth());
   const [moneyYear, setMoneyYear] = useState(new Date().getFullYear());
@@ -155,6 +159,7 @@ const [showInvestments, setShowInvestments] = useState(false);
 
   return (
     <div>
+      {canMoney && fullMoney && accounts.length === 0 && <FirstAccountPrompt onAdded={() => onRefresh()} />}
       {!canMoney && !canGym && !canInvest && (
         <div className="access-empty-state">
           <div className="access-empty-icon">{access.can('sabdekho') ? '📺' : '🔒'}</div>
@@ -167,8 +172,8 @@ const [showInvestments, setShowInvestments] = useState(false);
         </div>
       )}
 
-      {/* Action buttons row */}
-      {fullMoney && (
+      {/* Action buttons row: the owner's own Google Sheet */}
+      {access.isOwner && (
       <div className="invest-action-buttons" style={{ display: 'flex', gap: '0.75rem', marginBottom: '1.5rem', flexWrap: 'wrap' }}>
         <button className="action-btn" onClick={syncBalances} disabled={syncing} style={{ minWidth: '200px', justifyContent: 'center' }}>
           {syncing ? '⏳ Syncing...' : '🔄 Sync Balances from Sheet'}
@@ -181,15 +186,15 @@ const [showInvestments, setShowInvestments] = useState(false);
       )}
 
       {/* Hero row: Net Worth + Routines */}
-      {(showBalancesSection || canGym) && (
-      <div className="home-hero" style={showBalancesSection && canGym ? undefined : { gridTemplateColumns: '1fr' }}>
-        {showBalancesSection && (
+      {((showBalancesSection && hasMoney) || canGym) && (
+      <div className="home-hero" style={showBalancesSection && hasMoney && canGym ? undefined : { gridTemplateColumns: '1fr' }}>
+        {showBalancesSection && hasMoney && (
         <div className="net-worth-card">
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
             <div>
               <div className="nw-label">Overall Bank Balance</div>
               <div className="nw-value">{showBalances ? fmt(netWorth) : '₹ ••••••'}</div>
-              <div className="nw-sub">Across {accounts.length} accounts</div>
+              <div className="nw-sub">Across {accounts.length} {accounts.length === 1 ? 'account' : 'accounts'}</div>
             </div>
             <button
               onClick={() => setShowBalances(!showBalances)}
@@ -208,11 +213,11 @@ const [showInvestments, setShowInvestments] = useState(false);
       )}
 
       {/* Accounts */}
-      {showBalancesSection && (
+      {showBalancesSection && hasMoney && (
       <section className="section">
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '1.25rem' }}>
           <h2 className="section-title" style={{ margin: 0 }}>🏦 Account Balances</h2>
-          {fullMoney && (
+          {access.isOwner && (
           <button className="action-btn secondary" onClick={() => setIsReconcileOpen(true)} style={{ padding: '0.45rem 1rem' }}>
             ⚖️ Reconcile
           </button>
@@ -251,7 +256,7 @@ const [showInvestments, setShowInvestments] = useState(false);
       )}
 
       {/* Budget Summary Section */}
-      {canMoney && (
+      {canMoney && hasMoney && (
       <section className="section">
         <h2 className="section-title" style={{ margin: 0, marginBottom: '1.25rem' }}>🎯 Budget Goals {budgetSummary.active && <span style={{ fontSize: '0.85rem', fontWeight: 500, color: budgetSummary.over > 0 ? 'var(--neg)' : 'var(--text3)', marginLeft: '8px' }}>({budgetSummary.over === 0 ? 'All good this month!' : `${budgetSummary.over} over limit`})</span>}</h2>
         {budgetSummary.active ? (
@@ -281,7 +286,7 @@ const [showInvestments, setShowInvestments] = useState(false);
       )}
 
       {/* Investments */}
-      {canInvest && (
+      {canInvest && hasInvestments && (
       <section className="section">
         <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', marginBottom: '1.25rem' }}>
           <h2 className="section-title" style={{ margin: 0, flex: 'none', display: 'flex' }}>📊 Investment Portfolio</h2>
@@ -312,7 +317,7 @@ const [showInvestments, setShowInvestments] = useState(false);
       )}
 
       {/* Money: Income & Expenses by Account */}
-      {canMoney && (
+      {canMoney && hasMoney && (
       <section className="section">
         <div style={{ display: 'flex', gap: '1rem', alignItems: 'center', marginBottom: '1.5rem' }}>
           <h2 className="section-title" style={{ margin: 0 }}>💰 Money</h2>

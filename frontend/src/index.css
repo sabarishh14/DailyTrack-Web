@@ -10084,3 +10084,44 @@ input[type="date"]::-webkit-calendar-picker-indicator {
 
 [data-theme="light"] .st-profile-out { background: rgba(255, 255, 255, 0.6); }
 [data-theme="light"] .st-nav-item:hover { background: rgba(var(--accent-rgb), 0.08); }
+
+/* First run: no account yet (components/FirstAccountPrompt.jsx) */
+.first-run {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.35rem;
+  max-width: 420px;
+  margin: 1.5rem auto 2.5rem;
+  padding: 2rem 1.5rem;
+  text-align: center;
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  animation: fadeUp 0.25s ease;
+}
+
+.first-run-icon {
+  width: 64px;
+  height: 64px;
+  border-radius: 20px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 1.8rem;
+  margin-bottom: 0.6rem;
+  background: rgba(var(--accent-rgb), 0.12);
+  border: 1px solid rgba(var(--accent-rgb), 0.25);
+}
+
+.first-run b {
+  font-family: 'Syne', sans-serif;
+  font-size: 1.15rem;
+  color: var(--text);
+}
+
+.first-run > span:not(.first-run-icon) {
+  font-size: 0.85rem;
+  color: var(--text2);
+  margin-bottom: 1rem;
+}

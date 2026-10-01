@@ -29,12 +29,13 @@ def low_balance_message(changes):
     return title, "\n".join(lines)
 
 
-def send_low_balance_alert(changes):
-    """Fire-and-forget: the request that added the transaction doesn't wait on FCM."""
+def send_low_balance_alert(changes, owner):
+    """Fire-and-forget to the owner's own phones: the request that added the
+    transaction doesn't wait on FCM."""
     message = low_balance_message(changes)
-    if not message:
+    if not message or not owner:
         return
-    tokens = [t.token for t in DeviceToken.query.all()]
+    tokens = [t.token for t in DeviceToken.query.filter_by(email=owner).all()]
     if not tokens:
         return
     app = current_app._get_current_object()

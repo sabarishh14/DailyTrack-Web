@@ -22,9 +22,14 @@ const SECTIONS = [
     show: () => true,
   },
   {
+    id: 'money', icon: '💸', title: 'Money', desc: 'Budgets and hidden categories',
+    keywords: 'budget budgets limits hidden categories exclude analytics',
+    show: (a) => a.can('money', 'edit') && !a.isOwner,
+  },
+  {
     id: 'money', icon: '💸', title: 'Money & sync', desc: 'Google Sheets, reconciling, budgets and hidden categories',
     keywords: 'google sheets sheet sync balances transactions send reconcile budget budgets limits hidden categories exclude analytics',
-    show: (a) => a.can('money', 'edit'),
+    show: (a) => a.isOwner,
   },
   {
     id: 'sabdekho', icon: '🎬', title: 'SabDekho', desc: 'Films and Letterboxd',
@@ -34,11 +39,11 @@ const SECTIONS = [
   {
     id: 'nagapandi', icon: '✨', title: 'Nagapandi', desc: 'Your AI assistant',
     keywords: 'ai chat assistant nagapandi ask',
-    show: (a) => a.isAdmin,
+    show: (a) => a.isOwner,
   },
   {
-    id: 'access', icon: '🛡️', title: 'People & access', desc: 'Who can see and change what',
-    keywords: 'access control people users permissions invite share admin roles email',
+    id: 'access', icon: '🛡️', title: 'People', desc: 'Who can sign in',
+    keywords: 'access control people users invite admin roles email sign in',
     show: (a) => a.isAdmin,
   },
   {
@@ -147,7 +152,7 @@ export default function SettingsPage(props) {
               </header>
               {s.id === 'accounts' && <AccountsSection accounts={props.accounts} onRefresh={props.onRefresh} onToast={setToast} />}
               {s.id === 'appearance' && <AppearanceSection {...props} />}
-              {s.id === 'money' && <MoneySection {...props} full={access.money.fullAccess} onToast={setToast} />}
+              {s.id === 'money' && <MoneySection {...props} full={access.isOwner} onToast={setToast} />}
               {s.id === 'sabdekho' && <SabDekhoSection {...props} canSync={access.can('sabdekho', 'edit')} />}
               {s.id === 'nagapandi' && <NagapandiSection {...props} />}
               {s.id === 'access' && <AccessSection onOpen={props.onOpenAccessControl} />}
@@ -456,7 +461,7 @@ function NagapandiSection({ enableNagapandi, toggleNagapandi }) {
 function AccessSection({ onOpen }) {
   return (
     <div className="st-card st-rows">
-      <Row icon="🛡️" title="People & permissions" desc="Invite people and choose what each of them can see and change.">
+      <Row icon="🛡️" title="People" desc="Add or remove who can sign in. Everyone has their own data.">
         <button className="action-btn secondary" onClick={onOpen}>Manage</button>
       </Row>
     </div>

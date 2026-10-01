@@ -86,7 +86,7 @@ export default function TopBar({
                 </button>
                 {isAdmin && (
                   <button className="menu-item" onClick={() => { setIsMenuOpen(false); onOpenAccessControl(); }}>
-                    <span>🛡️</span> Access Control
+                    <span>🛡️</span> People
                     <span className="menu-item-sub">›</span>
                   </button>
                 )}

@@ -11,7 +11,7 @@ from extensions import (
     KITE_API_KEY, KITE_API_SECRET, TMDB_API_KEY,
 )
 from models import *
-from access import require_api_key, require_admin, require_access, current_access
+from access import require_api_key, require_admin, require_access, current_access, owner_only
 
 import hashlib
 from dateutil.relativedelta import relativedelta
@@ -189,11 +189,19 @@ def delete_recurring_task(tid):
         return jsonify({"success": True})
     return jsonify({"success": False, "message": "Task not found"}), 404
 def update_latest_portfolio_snapshot():
-    """Recalculates manual asset totals for the most recent snapshot so charts update instantly."""
+    """Recalculates manual asset totals for the most recent snapshot so charts
+    update instantly. Someone who has never synced Kite gets today's first one."""
     latest_snap = PortfolioSnapshot.query.order_by(PortfolioSnapshot.date.desc()).first()
-    if not latest_snap: return
-        
     manual_assets = ManualAsset.query.all()
+    if not latest_snap:
+        if not manual_assets:
+            return
+        latest_snap = PortfolioSnapshot(
+            id=int(datetime.now().timestamp() * 1000),
+            date=datetime.now(pytz.timezone('Asia/Kolkata')).date(),
+            total_equity_inv=0.0, total_equity_curr=0.0, total_mf_inv=0.0, total_mf_curr=0.0,
+        )
+        db.session.add(latest_snap)
     
     fixed_inv = sum(a.invested_value for a in manual_assets if a.category in ['FD', 'RD', 'Cash'])
     fixed_curr = sum(a.current_value for a in manual_assets if a.category in ['FD', 'RD', 'Cash'])
@@ -358,6 +366,8 @@ def get_equity():
 @invest_bp.route('/api/sync/kite', methods=['POST'])
 @require_access("invest")
 def sync_kite_direct():
+    denied = owner_only()
+    if denied: return denied
     print("🔄 Starting direct Kite sync...")
     data = request.json
     request_token = data.get('request_token')
@@ -529,6 +539,8 @@ def get_daily_equity_holdings(date_str):
 @invest_bp.route('/api/sync/investments-to-sheets', methods=['POST'])
 @require_access("invest")
 def sync_investments_to_sheets():
+    denied = owner_only()
+    if denied: return denied
     try:
         # Fetch only unsynced snapshots
         unsynced_invs = PortfolioSnapshot.query.filter_by(synced=False).all()

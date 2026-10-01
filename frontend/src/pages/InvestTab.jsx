@@ -15,7 +15,9 @@ import PinLockOverlay from './invest-components/PinLockOverlay';
 import { useAccess } from '../access/AccessContext';
 
 function InvestTab({ investments, manualAssets, assetList, onAdd }) {
-  const canEdit = useAccess().can('invest', 'edit');
+  const access = useAccess();
+  const canEdit = access.can('invest', 'edit');
+  const isOwner = access.isOwner;
 // 🚀 PIN LOCK STATES
   const [savedPin, setSavedPin] = useState(localStorage.getItem('dt_inv_pin'));
   const [isUnlocked, setIsUnlocked] = useState(sessionStorage.getItem('dt_inv_unlocked') === 'true');
@@ -157,7 +159,8 @@ function InvestTab({ investments, manualAssets, assetList, onAdd }) {
 
   // Fetch history specifically when multiple micro-assets are selected
   useEffect(() => {
-    if (chartCategory === 'ALL') { setSelectedAssets(new Set()); return; }
+    // Only clear when something is selected: a fresh empty Set every time re-ran this forever.
+    if (chartCategory === 'ALL') { setSelectedAssets(prev => (prev.size ? new Set() : prev)); return; }
 
     if (selectedAssets.size > 0) {
       // Find which assets we don't have cached yet
@@ -793,12 +796,16 @@ function InvestTab({ investments, manualAssets, assetList, onAdd }) {
                   <button className="action-btn" style={{ flex: 1, minWidth: '120px', justifyContent: 'center', background: 'var(--bg3)', border: '1px solid var(--border)', color: 'var(--text)', boxShadow: 'none' }} onClick={() => setIsAddModalOpen(true)}>
                     ➕ Add Asset
                   </button>
+                  {isOwner && (
+                  <>
                   <button className="action-btn" style={{ flex: 1, minWidth: '120px', justifyContent: 'center', background: 'linear-gradient(135deg, #14b8a6 0%, #0d9488 100%)', boxShadow: '0 4px 15px rgba(20, 184, 166, 0.2)' }} onClick={handleSyncToSheets} disabled={syncingSheets}>
                     {syncingSheets ? '⏳ Syncing...' : '📥 Sync Sheets'}
                   </button>
                   <button className="action-btn" style={{ flex: 1, minWidth: '120px', justifyContent: 'center', background: 'linear-gradient(135deg, #ef4444 0%, #dc2626 100%)', boxShadow: '0 4px 15px rgba(239, 68, 68, 0.3)' }} onClick={handleOpenKite}>
                     ⚡ Sync Broker
                   </button>
+                  </>
+                  )}
                 </>
               ) : (
                 <div style={{ display: 'flex', gap: '0.5rem', width: '100%', animation: 'fadeIn 0.3s ease', flexWrap: 'wrap' }}>

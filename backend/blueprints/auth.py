@@ -13,6 +13,7 @@ from extensions import (
 )
 from models import *
 from access import require_api_key, require_admin, require_access, current_access, get_access, invalidate_access
+from blueprints.media import letterboxd_username, save_letterboxd_username, LETTERBOXD_NAME
 
 
 auth_bp = Blueprint("auth", __name__)
@@ -52,5 +53,22 @@ def firebase_login():
 @auth_bp.route('/api/auth/me', methods=['GET'])
 @require_api_key
 def get_me():
-    """The caller's current role and permissions. Clients poll this to stay in sync."""
-    return jsonify({"success": True, "access": current_access().to_dict()})
+    """The caller's current role, permissions and settings. Clients poll this to stay in sync."""
+    return jsonify({"success": True, "access": current_access().to_dict(), "settings": _my_settings()})
+
+
+def _my_settings():
+    return {"letterboxd_username": letterboxd_username()}
+
+
+@auth_bp.route('/api/me/settings', methods=['PUT'])
+@require_api_key
+def update_my_settings():
+    """Change the signed-in person's own settings; keys left out stay as they are."""
+    data = request.json or {}
+    if 'letterboxd_username' in data:
+        name = str(data.get('letterboxd_username') or '').strip()
+        if name and not LETTERBOXD_NAME.match(name):
+            return jsonify({"success": False, "message": "That isn't a Letterboxd username"}), 400
+        save_letterboxd_username(name)
+    return jsonify({"success": True, "settings": _my_settings()})

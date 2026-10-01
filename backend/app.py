@@ -99,8 +99,8 @@ with app.app_context():
         # existing ones are left alone.
         import models  # noqa: F401 - registers every table before create_all
         db.create_all()
-        # Running balances and account filters walk one account's history in date order.
-        db.session.execute(text("CREATE INDEX IF NOT EXISTS ix_transactions_account_date_id ON transactions (account, date, id)"))
+        # Running balances and account filters walk one person's account history in date order.
+        db.session.execute(text("CREATE INDEX IF NOT EXISTS ix_transactions_owner_account_date_id ON transactions (owner_email, account, date, id)"))
         db.session.commit()
     except Exception as e:
         db.session.rollback()

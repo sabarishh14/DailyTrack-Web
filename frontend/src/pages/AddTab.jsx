@@ -6,8 +6,10 @@ import { getAuth, signInWithPopup, GoogleAuthProvider, signOut } from 'firebase/
 import SabDekho from './SabDekho';
 
 import { API } from '../constants';
-import { accountOptions, getToken, evaluateMath, buildDescriptionIndex, guessDescription, categoriesForType, descriptionOptions } from '../utils';
+import { accountOptions, defaultAccount, getToken, evaluateMath, buildDescriptionIndex, guessDescription, categoriesForType, descriptionOptions } from '../utils';
 import { useMoneyMeta, EMPTY_META } from '../api/money';
+import { useAccess } from '../access/AccessContext';
+import FirstAccountPrompt from '../components/FirstAccountPrompt';
 import CustomSelect from '../components/CustomSelect';
 import AutocompleteInput from '../components/AutocompleteInput';
 import TmdbMovieSearchInput from '../components/TmdbMovieSearchInput';
@@ -25,9 +27,10 @@ function AddTab({ accounts, categories, onAdd, dataVersion }) {
   // Built once per data refresh, reused on every guess.
   const descriptionIndex = useMemo(() => buildDescriptionIndex(meta.descriptions), [meta.descriptions]);
 
+  const isOwner = useAccess().isOwner;
   const createEmptyRow = () => ({
     id: Date.now() + Math.random(),
-    account: 'KOTAK',
+    account: defaultAccount(accounts),
     date: today,
     type: 'Debit',
     heading: '',
@@ -71,6 +74,12 @@ function AddTab({ accounts, categories, onAdd, dataVersion }) {
   useEffect(() => {
     localStorage.setItem('dt_draft_txs', JSON.stringify(rows));
   }, [rows]);
+
+  // Rows started before there was an account (a first one just added) get it.
+  useEffect(() => {
+    const first = defaultAccount(accounts);
+    if (first) setRows(rs => rs.some(r => !r.account) ? rs.map(r => (r.account ? r : { ...r, account: first })) : rs);
+  }, [accounts]);
 
   const updateRow = (id, field, value) => {
     setRows(prevRows => prevRows.map(row => row.id === id ? { ...row, [field]: value } : row));
@@ -236,7 +245,6 @@ function AddTab({ accounts, categories, onAdd, dataVersion }) {
           exclude_analytics: false,
 movie_tags: r.movie_tags,
           movie_data: r.movie_data,
-          lbx_username: localStorage.getItem('dt_lbx_username') || 'sabarishh14'
         };
 
         if (r.isSplit && r.split_data && r.split_data.members.length > 0) {
@@ -275,6 +283,10 @@ movie_tags: r.movie_tags,
       setLoading(false);
     }
   };
+
+  if (!(accounts || []).length) {
+    return <FirstAccountPrompt onAdded={() => onAdd()} />;
+  }
 
   return (
     <section className="section" style={{ animation: 'fadeUp 0.2s ease', maxWidth: '1200px', margin: '0 auto' }}>
@@ -469,6 +481,7 @@ movie_tags: r.movie_tags,
                 <div style={{ margin: '0.5rem 0 1rem 0', padding: '1.25rem', background: 'var(--bg2)', borderRadius: '12px', border: '1px solid var(--border)', boxShadow: '0 4px 12px rgba(0,0,0,0.1)' }}>
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.25rem', paddingBottom: '0.75rem', borderBottom: '1px solid var(--border)', flexWrap: 'wrap', gap: '10px' }}>
                     <h4 style={{ margin: 0, display: 'flex', alignItems: 'center', gap: '8px', color: 'var(--text1)' }}>👥 Split Details</h4>
+                    {isOwner && (
                     <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap' }}>
                       <button
                         className="action-btn"
@@ -479,6 +492,7 @@ movie_tags: r.movie_tags,
                         {row.split_data?.loading ? '⏳ Parsing...' : '🔍 Fetch Receipt'}
                       </button>
                     </div>
+                    )}
                   </div>
 
                   <div style={{ display: 'flex', gap: '1.5rem', marginBottom: '1rem', flexWrap: 'wrap' }}>
