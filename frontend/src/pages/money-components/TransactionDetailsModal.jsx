@@ -16,7 +16,7 @@ export default function TransactionDetailsModal({
 
   return (
     <div className="modal-backdrop" onClick={() => setActionMenuTx(null)}>
-      <div className="modal-content" onClick={e => e.stopPropagation()} style={{ padding: 0, maxWidth: '400px', maxHeight: '85vh', display: 'flex', flexDirection: 'column' }}>
+      <div className="modal-content" onClick={e => e.stopPropagation()} style={{ padding: 0, maxWidth: '400px' }}>
 
         {/* Header / Info Row */}
         <div style={{ padding: '1.5rem', borderBottom: '1px solid var(--border)' }}>

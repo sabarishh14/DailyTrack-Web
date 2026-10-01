@@ -1970,6 +1970,11 @@ input[type="date"]::-webkit-calendar-picker-indicator {
   box-shadow: 0 24px 50px rgba(0, 0, 0, 0.5);
   display: flex;
   flex-direction: column;
+  /* Caps any modal's height and scrolls its own content, so a tall one (many
+     split members, a long description) never pushes its last buttons off
+     past the viewport instead of just scrolling to them. */
+  max-height: 85vh;
+  overflow-y: auto;
   animation: slideUp 0.3s cubic-bezier(0.16, 1, 0.3, 1);
 }
 
@@ -2337,12 +2342,19 @@ input[type="date"]::-webkit-calendar-picker-indicator {
   .modal-backdrop {
     align-items: center;
     padding: 1rem;
+    /* The fixed bottom nav sits in this space too; reserve it so a modal
+       centered in the full viewport height never settles partly behind it. */
+    padding-bottom: calc(65px + env(safe-area-inset-bottom) + 1rem);
     cursor: pointer;
   }
 
   .modal-content {
     width: 100%;
-    max-height: 90vh;
+    /* Leaves room for the fixed bottom nav so a tall modal (e.g. a split with
+       many members) can never grow its action buttons into, or under, it —
+       it scrolls internally instead. */
+    max-height: calc(100dvh - 65px - env(safe-area-inset-bottom) - 2rem);
+    overflow-y: auto;
     border-radius: var(--radius-lg);
     animation: slideUp 0.3s ease;
     cursor: default;
@@ -10125,3 +10137,39 @@ input[type="date"]::-webkit-calendar-picker-indicator {
   color: var(--text2);
   margin-bottom: 1rem;
 }
+
+/* Settings -> Accounts: tap a balance to edit it */
+.st-balance-btn {
+  background: none;
+  border: 1px dashed transparent;
+  border-radius: 8px;
+  padding: 0.2rem 0.45rem;
+  margin-right: -0.45rem;
+  font-family: inherit;
+  cursor: pointer;
+  transition: border-color 0.15s, background 0.15s;
+}
+.st-balance-btn:hover { border-color: var(--border2); background: rgba(var(--accent-rgb), 0.06); }
+.st-balance-edit {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  padding: 0.2rem 0.45rem;
+  border-radius: 8px;
+  border: 1px solid var(--accent);
+  background: var(--card);
+  color: var(--text2);
+  font-weight: 700;
+}
+.st-balance-edit input {
+  width: 90px;
+  background: transparent;
+  border: none;
+  outline: none;
+  color: var(--text);
+  font-family: inherit;
+  font-size: 0.9rem;
+  font-weight: 700;
+  text-align: right;
+}
+.st-balance-edit button { background: none; border: none; color: var(--pos); cursor: pointer; font-size: 0.9rem; padding: 0 0.1rem; }

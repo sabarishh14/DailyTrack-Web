@@ -2,7 +2,8 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { ACCENT_PALETTES } from '../constants';
 import { useAccess } from '../access/AccessContext';
 import { apiGet, apiPost, useMoneyMeta, EMPTY_META } from '../api/money';
-import { accountColor, fmt, getBankEmoji, isCcAccount } from '../utils';
+import { API } from '../constants';
+import { accountColor, fmt, getBankEmoji, getToken, isCcAccount } from '../utils';
 import { MinBalanceChip } from '../components/BalanceImpact';
 import ReconciliationModal from '../components/ReconciliationModal';
 import BudgetManagerModal from '../components/BudgetManagerModal';
@@ -241,7 +242,7 @@ function AccountsSection({ accounts = [], onRefresh, onToast }) {
                 ? <MinBalanceChip account={a.account} min={a.min_balance} editable onSaved={onRefresh} />
                 : <span className="st-muted">Balance not tracked</span>}
             </div>
-            {a.balance_tracked && <span className="st-acc-balance">{fmt(a.balance || 0)}</span>}
+            {a.balance_tracked && <BalanceEdit account={a} onSaved={onRefresh} onToast={onToast} />}
           </div>
         ))}
       </div>
@@ -272,6 +273,56 @@ function AccountsSection({ accounts = [], onRefresh, onToast }) {
         />
       )}
     </div>
+  );
+}
+
+/** A savings account's balance: tap to set it to what the bank shows. */
+function BalanceEdit({ account, onSaved, onToast }) {
+  const [editing, setEditing] = useState(false);
+  const [value, setValue] = useState('');
+  const [saving, setSaving] = useState(false);
+
+  const start = () => { setValue(String(account.balance ?? 0)); setEditing(true); };
+  const save = async () => {
+    const n = Number(String(value).trim());
+    if (!String(value).trim() || !Number.isFinite(n)) return;
+    if (n === Number(account.balance ?? 0)) { setEditing(false); return; }
+    setSaving(true);
+    try {
+      const res = await fetch(`${API}/accounts`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${getToken()}` },
+        body: JSON.stringify({ account: account.account, balance: n }),
+      });
+      if (!res.ok) throw new Error(`Server returned ${res.status}`);
+      setEditing(false);
+      onToast(`✅ ${account.account} set to ${fmt(n)}`);
+      onSaved();
+    } catch (e) {
+      onToast(`Couldn't save: ${e.message}`);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  if (!editing) {
+    return (
+      <button className="st-acc-balance st-balance-btn" onClick={start} title="Edit balance">
+        {fmt(account.balance || 0)}
+      </button>
+    );
+  }
+  return (
+    <span className="st-balance-edit">
+      <span>₹</span>
+      <input
+        autoFocus inputMode="decimal" value={value} disabled={saving}
+        onChange={e => setValue(e.target.value)}
+        onKeyDown={e => { if (e.key === 'Enter') save(); if (e.key === 'Escape') setEditing(false); }}
+        onBlur={() => { if (!saving) setEditing(false); }}
+      />
+      <button onMouseDown={e => e.preventDefault()} onClick={save} disabled={saving} aria-label="Save">{saving ? '…' : '✓'}</button>
+    </span>
   );
 }
 
