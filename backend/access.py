@@ -129,12 +129,24 @@ class Access:
             query = query.filter(Transaction.account.in_(self.accounts))
         return query
 
+    @classmethod
+    def viewing(cls, viewer, owner, modules):
+        """viewer looking at what owner shared with them: those modules, read-only."""
+        shared = {m: "view" for m in (modules or []) if m in MODULES}
+        access = cls(viewer, "member", {"modules": shared})
+        access.data_owner = owner
+        access.viewing_owner = owner
+        return access
+
+    viewing_owner = None
+
     def to_dict(self):
         return {
             "email": self.email,
             "role": self.role,
             "isOwner": self.is_owner,
             "isAdmin": self.is_admin,
+            "viewing": self.viewing_owner,
             "modules": dict(self.modules),
             "money": {
                 "categories": self.categories,
@@ -234,6 +246,18 @@ def _authenticate():
     access = get_access(payload.get("email") or payload.get("sub"))
     if access is None:
         return jsonify({"success": False, "code": "ACCESS_REVOKED", "message": "Your access has been revoked"}), 401
+
+    # X-View-As: someone else's data they've shared with this person, read-only.
+    view_as = (request.headers.get("X-View-As") or "").strip().lower()
+    if view_as and view_as != access.email:
+        from models import Share
+        share = db.session.get(Share, {"owner_email": view_as, "viewer_email": access.email})
+        if share is None:
+            return jsonify({"success": False, "code": "NOT_SHARED", "message": "That isn't shared with you"}), 403
+        if request.method not in ("GET", "HEAD"):
+            return _forbidden("This is shared with you to view only")
+        access = Access.viewing(access.email, view_as, share.modules)
+
     g.access = access
     g.data_owner = access.data_owner
     return None

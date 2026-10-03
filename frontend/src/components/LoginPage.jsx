@@ -11,6 +11,8 @@ import { auth, googleProvider } from '../config/firebase';
 export default function LoginPage({ onLogin, notice }) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+  // Not in yet: the server sent a request to the admin.
+  const [requested, setRequested] = useState(null);
 
   const handleGoogleLogin = async () => {
     setLoading(true); setError('');
@@ -30,6 +32,9 @@ export default function LoginPage({ onLogin, notice }) {
         localStorage.setItem('dt_token', data.token);
         if (data.isAdmin) localStorage.setItem('dt_is_admin', 'true');
         onLogin(data.access);
+      } else if (data.code === 'REQUESTED') {
+        setRequested(data.email || result.user.email || '');
+        signOut(auth).catch(() => {});
       } else {
         setError(data.message || 'Login failed.');
       }
@@ -49,8 +54,18 @@ export default function LoginPage({ onLogin, notice }) {
           <div style={{ fontSize: '0.8rem', color: 'var(--text2)', marginTop: '0.4rem' }}>Personal Dashboard</div>
         </div>
 
-        {notice && !error && <div className="login-notice">{notice}</div>}
-        {error && <div style={{ fontSize: '0.8rem', color: 'var(--neg)', textAlign: 'center', width: '100%' }}>{error}</div>}
+        {requested !== null ? (
+          <div className="login-requested">
+            <span aria-hidden="true">📨</span>
+            <b>Request sent</b>
+            <span>{requested ? `${requested} can sign in once it's approved.` : "You can sign in once it's approved."}</span>
+          </div>
+        ) : (
+          <>
+            {notice && !error && <div className="login-notice">{notice}</div>}
+            {error && <div style={{ fontSize: '0.8rem', color: 'var(--neg)', textAlign: 'center', width: '100%' }}>{error}</div>}
+          </>
+        )}
 
         <button
           onClick={handleGoogleLogin}

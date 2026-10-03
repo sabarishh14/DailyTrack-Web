@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { CHOICES, COLORS, SKIP_REASONS, dayMonth, mix, mixTotal, monthGrid, monthLabel, monthOf, parseDay, shiftMonth } from './routines';
+import { useAccess } from '../../access/AccessContext';
 
 /** A thin ring split into done, skipped and missed, over a track for what's still open. */
 export function MixRing({ mix: m, size = 44, stroke = 4, children }) {
@@ -133,6 +134,9 @@ export function HistoryCalendar({ month, history, today, firstDay, onMonth, onDa
 
 /** ❤️ 😭 ⏭️: picking the current answer again clears it. A skip asks why, optionally. */
 export function AnswerButtons({ item, onAnswer, disabled }) {
+  // Someone else's routines, shared with you: their answers show, but can't be changed.
+  const viewing = !!useAccess().raw?.viewing;
+  disabled = disabled || viewing;
   const [askingWhy, setAskingWhy] = useState(false);
   const [why, setWhy] = useState('');
   const pick = (status) => {

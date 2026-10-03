@@ -51,6 +51,7 @@ function Segmented({ value, options, onChange }) {
 export default function AccessControlModal({ onClose, currentEmail }) {
   const [users, setUsers] = useState([]);
   const [owners, setOwners] = useState([]);
+  const [requests, setRequests] = useState([]);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState('');
   const [newEmail, setNewEmail] = useState('');
@@ -68,6 +69,7 @@ export default function AccessControlModal({ onClose, currentEmail }) {
       if (!u.success) throw new Error(u.message || 'Could not load people');
       setUsers(u.users);
       setOwners(u.owners);
+      setRequests(u.requests || []);
     } catch (e) {
       setLoadError(e.message);
     } finally {
@@ -154,6 +156,22 @@ export default function AccessControlModal({ onClose, currentEmail }) {
     }
   };
 
+  /** Approve lets them sign in as a member; decline just clears the request. */
+  const answer = async (email, approve) => {
+    setRequests(list => list.filter(r => r.email !== email));
+    try {
+      const res = await fetch(`${API}/admin/requests/${encodeURIComponent(email)}${approve ? '/approve' : ''}`, {
+        method: approve ? 'POST' : 'DELETE', headers: authHeaders(),
+      }).then(r => r.json());
+      if (!res.success) throw new Error(res.message || 'Could not save');
+      setToast(approve ? `${email} can now sign in` : 'Request declined');
+      load();
+    } catch (e) {
+      setError(e.message);
+      load();
+    }
+  };
+
   const visibleUsers = useMemo(() => {
     const q = query.trim().toLowerCase();
     return q ? users.filter(u => u.email.toLowerCase().includes(q)) : users;
@@ -209,6 +227,23 @@ export default function AccessControlModal({ onClose, currentEmail }) {
               <div className="ac-error">Couldn't load people: {loadError} <button className="ac-link" onClick={load}>Retry</button></div>
             ) : (
               <>
+                {requests.length > 0 && (
+                  <>
+                    <div className="ac-section-label">Requests</div>
+                    {requests.map(r => (
+                      <div key={r.email} className="ac-user static">
+                        <Avatar email={r.email} />
+                        <div className="ac-user-main">
+                          <div className="ac-user-email">{r.email}</div>
+                          {r.name && <div className="ac-user-sub">{r.name}</div>}
+                        </div>
+                        <button className="action-btn secondary ac-req-btn" onClick={() => answer(r.email, false)}>Decline</button>
+                        <button className="action-btn ac-req-btn" onClick={() => answer(r.email, true)}>Approve</button>
+                      </div>
+                    ))}
+                  </>
+                )}
+
                 <div className="ac-section-label">Owners</div>
                 {owners.map(email => (
                   <div key={email} className="ac-user static">

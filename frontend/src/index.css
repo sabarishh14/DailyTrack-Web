@@ -10173,3 +10173,131 @@ input[type="date"]::-webkit-calendar-picker-indicator {
   text-align: right;
 }
 .st-balance-edit button { background: none; border: none; color: var(--pos); cursor: pointer; font-size: 0.9rem; padding: 0 0.1rem; }
+
+/* ── Sharing (Phase 3) ── */
+.view-banner {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  padding: 0.5rem 1rem 0.5rem 2rem;
+  background: linear-gradient(90deg, rgba(var(--accent-rgb), 0.16), rgba(var(--accent-rgb), 0.05));
+  border-bottom: 1px solid rgba(var(--accent-rgb), 0.25);
+  font-size: 0.82rem;
+  color: var(--text2);
+  flex-shrink: 0;
+}
+.view-banner-text { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.view-banner-text b { color: var(--text); font-weight: 700; }
+.view-banner button {
+  flex-shrink: 0;
+  padding: 0.35rem 0.8rem;
+  border-radius: 999px;
+  border: 1px solid rgba(var(--accent-rgb), 0.4);
+  background: rgba(var(--accent-rgb), 0.12);
+  color: var(--accent-text);
+  font-family: inherit;
+  font-size: 0.78rem;
+  font-weight: 700;
+  cursor: pointer;
+}
+.view-banner button:hover { background: rgba(var(--accent-rgb), 0.22); }
+
+.menu-item.on { color: var(--accent-text); }
+.menu-item-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 190px; }
+.menu-dot {
+  position: absolute;
+  top: 4px;
+  right: 3px;
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: var(--neg);
+  box-shadow: 0 0 0 2px var(--bg2);
+}
+.menu-badge {
+  margin-left: auto;
+  min-width: 20px;
+  height: 20px;
+  padding: 0 6px;
+  border-radius: 999px;
+  background: var(--neg);
+  color: #fff;
+  font-size: 0.72rem;
+  font-weight: 800;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.st-chips { display: flex; flex-wrap: wrap; gap: 0.4rem; }
+.st-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.35rem 0.75rem;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: var(--card2);
+  color: var(--text2);
+  font-family: inherit;
+  font-size: 0.78rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+.st-chip:hover { color: var(--text); }
+.st-chip.on {
+  color: var(--accent-text);
+  border-color: rgba(var(--accent-rgb), 0.5);
+  background: rgba(var(--accent-rgb), 0.14);
+}
+.st-share-add { display: flex; flex-direction: column; gap: 0.7rem; }
+.st-share-add .st-inline-form input { flex: 1; width: auto; min-width: 0; }
+.st-share-list { display: flex; flex-direction: column; gap: 0.6rem; }
+.st-share-row {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+  padding: 0.75rem 0.9rem;
+  border-radius: 14px;
+  background: var(--card2);
+  border: 1px solid var(--border);
+}
+.st-share-row.inline { flex-direction: row; align-items: center; gap: 0.75rem; }
+.st-share-row.inline .action-btn { padding: 0.45rem 1rem; font-size: 0.82rem; }
+.st-share-head { display: flex; align-items: center; gap: 0.6rem; min-width: 0; }
+.st-share-head b { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 0.88rem; color: var(--text); }
+.st-share-x {
+  background: none;
+  border: none;
+  color: var(--text2);
+  font-size: 1.3rem;
+  line-height: 1;
+  cursor: pointer;
+  padding: 0 0.2rem;
+}
+.st-share-x:hover { color: var(--neg); }
+.st-avatar.sm { width: 32px; height: 32px; border-radius: 10px; font-size: 0.9rem; box-shadow: none; }
+
+.login-requested {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.3rem;
+  width: 100%;
+  padding: 1rem;
+  border-radius: 14px;
+  text-align: center;
+  background: rgba(var(--accent-rgb), 0.1);
+  border: 1px solid rgba(var(--accent-rgb), 0.25);
+  font-size: 0.82rem;
+  color: var(--text2);
+}
+.login-requested > span:first-child { font-size: 1.6rem; }
+.login-requested b { color: var(--text); font-size: 0.95rem; }
+
+.ac-req-btn { padding: 0.4rem 0.8rem !important; font-size: 0.78rem !important; }
+
+@media (max-width: 768px) {
+  .view-banner { padding: 0.5rem 1rem; }
+}

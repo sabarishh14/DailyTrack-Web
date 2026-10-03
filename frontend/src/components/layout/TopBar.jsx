@@ -18,6 +18,10 @@ export default function TopBar({
   onOpenSettings,
   onOpenAccessControl,
   logout,
+  viewAs = null,
+  sharedWithMe = [],
+  onSwitchView,
+  pendingRequests = 0,
 }) {
   return (
     <header className="topbar">
@@ -65,9 +69,10 @@ export default function TopBar({
             onClick={() => setIsMenuOpen(!isMenuOpen)}
             aria-label="Menu"
             aria-expanded={isMenuOpen}
-            style={{ background: 'transparent', border: 'none', color: 'var(--text)', cursor: 'pointer', padding: '0.4rem', display: 'flex' }}
+            style={{ background: 'transparent', border: 'none', color: 'var(--text)', cursor: 'pointer', padding: '0.4rem', display: 'flex', position: 'relative' }}
           >
             <svg width="26" height="26" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 6h16M4 12h16M4 18h16" /></svg>
+            {isAdmin && pendingRequests > 0 && <span className="menu-dot" aria-label={`${pendingRequests} waiting to join`} />}
           </button>
 
           {isMenuOpen && (
@@ -79,6 +84,24 @@ export default function TopBar({
                 </div>
               )}
 
+              {/* Whose data is on screen: yours, or someone's shared with you */}
+              {(sharedWithMe.length > 0 || viewAs) && (
+                <div className="menu-section" style={{ padding: '0.35rem 0' }}>
+                  <div className="menu-section-title" style={{ padding: '0 0.75rem' }}>Viewing</div>
+                  {[null, ...sharedWithMe.map(s => s.owner)].map(owner => (
+                    <button
+                      key={owner || 'me'}
+                      className={`menu-item ${viewAs === owner ? 'on' : ''}`}
+                      onClick={() => { setIsMenuOpen(false); if (viewAs !== owner) onSwitchView(owner); }}
+                    >
+                      <span>{owner ? '👀' : '🙂'}</span>
+                      <span className="menu-item-name">{owner || 'Mine'}</span>
+                      {viewAs === owner && <span className="menu-item-sub">✓</span>}
+                    </button>
+                  ))}
+                </div>
+              )}
+
               <div className="menu-section" style={{ padding: '0.35rem 0' }}>
                 <button className="menu-item" onClick={() => { setIsMenuOpen(false); onOpenSettings(); }}>
                   <span>⚙️</span> Settings
@@ -87,7 +110,9 @@ export default function TopBar({
                 {isAdmin && (
                   <button className="menu-item" onClick={() => { setIsMenuOpen(false); onOpenAccessControl(); }}>
                     <span>🛡️</span> People
-                    <span className="menu-item-sub">›</span>
+                    {pendingRequests > 0
+                      ? <span className="menu-badge">{pendingRequests}</span>
+                      : <span className="menu-item-sub">›</span>}
                   </button>
                 )}
               </div>

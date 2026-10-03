@@ -230,6 +230,20 @@ class BalanceAdjustment(Owned, db.Model):
     date = db.Column(db.Date, nullable=False)
     delta = db.Column(Money, nullable=False)
     reason = db.Column(db.String(40))
+class Share(db.Model):
+    """owner_email lets viewer_email see some of their data, read-only.
+    modules: the ones shared, e.g. ["money", "invest"]."""
+    __tablename__ = "shares"
+    owner_email = db.Column(db.String(120), primary_key=True)
+    viewer_email = db.Column(db.String(120), primary_key=True, index=True)
+    modules = db.Column(db.JSON, nullable=False, default=list)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+class AccessRequest(db.Model):
+    """Someone not yet allowed tried to sign in; an admin approves or declines."""
+    __tablename__ = "access_requests"
+    email = db.Column(db.String(120), primary_key=True)
+    name = db.Column(db.String(120))
+    requested_at = db.Column(db.DateTime, default=datetime.utcnow)
 class UserSettings(db.Model):
     """One person's preferences that follow them across devices."""
     __tablename__ = "user_settings"

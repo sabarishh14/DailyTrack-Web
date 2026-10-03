@@ -2,6 +2,7 @@ import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { EmojiBadge, HistoryCalendar, ItemRow, Legend, MixRing, WeekBars } from './routines-components/RoutineParts';
 import { DayModal, RoutineModal } from './routines-components/RoutineModals';
 import RoutineEditor from './routines-components/RoutineEditor';
+import { useAccess } from '../access/AccessContext';
 import {
   addDays, dayMonth, fetchSummary, mix, percent, saveAnswer, scoreMix, trendPoints, verdict, weekday,
 } from './routines-components/routines';
@@ -25,6 +26,8 @@ function RoutinesTab() {
   const [openRoutine, setOpenRoutine] = useState(null);
   // null, or { routine } to edit one (routine null to add a new one).
   const [editing, setEditing] = useState(null);
+  // Viewing someone else's routines: everything shows, nothing changes.
+  const viewing = !!useAccess().raw?.viewing;
   const [saving, setSaving] = useState(false);
   const latest = useRef(0);
   const monthRef = useRef(month);
@@ -121,11 +124,11 @@ function RoutinesTab() {
           Habits to build, things to quit, challenges with a finish line and chores that come round again.
           Check in here or on the phone.
         </div>
-        <button className="action-btn" style={{ marginTop: '0.75rem' }} onClick={() => setEditing({ routine: null })}>＋ Add a routine</button>
+        {!viewing && <button className="action-btn" style={{ marginTop: '0.75rem' }} onClick={() => setEditing({ routine: null })}>＋ Add a routine</button>}
         {archived.length > 0 && (
           <div className="rt-list rt-archived" style={{ marginTop: '1rem', width: '100%', maxWidth: 380 }}>
             {archived.map(r => (
-              <button key={r.id} className="rt-row" onClick={() => setEditing({ routine: r })}>
+              <button key={r.id} className="rt-row" onClick={() => !viewing && setEditing({ routine: r })}>
                 <EmojiBadge routine={r} size={30} />
                 <span className="rt-row-text">
                   <span className="rt-item-name">{r.name}</span>
@@ -258,7 +261,7 @@ function RoutinesTab() {
           <section className="rt-card">
             <div className="rt-card-head">
               <h3>Your routines <span className="rt-count">{active.length}</span></h3>
-              <button className="rt-add" onClick={() => setEditing({ routine: null })}>＋ Add</button>
+              {!viewing && <button className="rt-add" onClick={() => setEditing({ routine: null })}>＋ Add</button>}
             </div>
             <div className="rt-list">
               {active.map(r => (
@@ -283,7 +286,7 @@ function RoutinesTab() {
                 {showArchived && (
                   <div className="rt-list rt-archived">
                     {archived.map(r => (
-                      <button key={r.id} className="rt-row" onClick={() => setEditing({ routine: r })} title="Restore or delete">
+                      <button key={r.id} className="rt-row" onClick={() => !viewing && setEditing({ routine: r })} title="Restore or delete">
                         <EmojiBadge routine={r} size={30} />
                         <span className="rt-row-text">
                           <span className="rt-item-name">{r.name}</span>
@@ -315,7 +318,7 @@ function RoutinesTab() {
           today={today}
           onClose={() => setOpenRoutine(null)}
           onChanged={load}
-          onEdit={() => { setEditing({ routine: routinesById[openRoutine] }); setOpenRoutine(null); }}
+          onEdit={viewing ? undefined : () => { setEditing({ routine: routinesById[openRoutine] }); setOpenRoutine(null); }}
         />
       )}
       {editor}

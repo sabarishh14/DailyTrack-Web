@@ -43,6 +43,12 @@ const SECTIONS = [
     show: (a) => a.isOwner,
   },
   {
+    id: 'sharing', icon: '🤝', title: 'Sharing', desc: 'Let friends view your data',
+    keywords: 'share sharing friends family view see read only partner',
+    // Changing shares is about your own data, so not while viewing someone else's.
+    show: (a) => !!a.email && !a.raw?.viewing,
+  },
+  {
     id: 'access', icon: '🛡️', title: 'People', desc: 'Who can sign in',
     keywords: 'access control people users invite admin roles email sign in',
     show: (a) => a.isAdmin,
@@ -156,6 +162,7 @@ export default function SettingsPage(props) {
               {s.id === 'money' && <MoneySection {...props} full={access.isOwner} onToast={setToast} />}
               {s.id === 'sabdekho' && <SabDekhoSection {...props} canSync={access.can('sabdekho', 'edit')} />}
               {s.id === 'nagapandi' && <NagapandiSection {...props} />}
+              {s.id === 'sharing' && <SharingSection viewAs={props.viewAs} onSwitchView={props.onSwitchView} onToast={setToast} />}
               {s.id === 'access' && <AccessSection onOpen={props.onOpenAccessControl} />}
               {s.id === 'about' && <AboutSection access={access} onLogout={props.logout} />}
             </section>
@@ -505,6 +512,139 @@ function NagapandiSection({ enableNagapandi, toggleNagapandi }) {
       <Row icon="✨" title="Nagapandi AI" desc="The chat bubble, and answers from Nagapandi in search (Ctrl K).">
         <Toggle on={enableNagapandi} onChange={toggleNagapandi} label="Nagapandi AI" />
       </Row>
+    </div>
+  );
+}
+
+const SHARE_MODULES = [
+  ['money', '💰', 'Money'],
+  ['gym', '🌱', 'Routines'],
+  ['invest', '📈', 'Investments'],
+  ['sabdekho', '📺', 'SabDekho'],
+];
+
+function ModuleChips({ value, onToggle, disabled }) {
+  return (
+    <div className="st-chips">
+      {SHARE_MODULES.map(([id, icon, label]) => (
+        <button
+          key={id}
+          type="button"
+          className={`st-chip ${value.includes(id) ? 'on' : ''}`}
+          aria-pressed={value.includes(id)}
+          disabled={disabled}
+          onClick={() => onToggle(id)}
+        >
+          <span aria-hidden="true">{icon}</span>{label}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+/** Your data, view-only, for the people you choose; and what's shared with you. */
+function SharingSection({ viewAs, onSwitchView, onToast }) {
+  const [mine, setMine] = useState(null);
+  const [withMe, setWithMe] = useState([]);
+  const [email, setEmail] = useState('');
+  const [picked, setPicked] = useState(['money']);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+
+  const load = () => apiGet('/shares')
+    .then(r => { if (r.success) { setMine(r.mine); setWithMe(r.with_me); } })
+    .catch(() => setMine([]));
+  useEffect(() => { load(); }, []);
+
+  const save = async (viewer, modules) => {
+    const res = await fetch(`${API}/shares/${encodeURIComponent(viewer)}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${getToken()}` },
+      body: JSON.stringify({ modules }),
+    }).then(r => r.json());
+    if (!res.success) throw new Error(res.message || "Couldn't save");
+  };
+
+  const add = async (e) => {
+    e.preventDefault();
+    const viewer = email.trim().toLowerCase();
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(viewer)) { setError('Enter a valid email'); return; }
+    if (!picked.length) { setError('Pick something to share'); return; }
+    setBusy(true); setError('');
+    try {
+      await save(viewer, picked);
+      setEmail('');
+      onToast(`✅ Shared with ${viewer}`);
+      load();
+    } catch (err) { setError(err.message); } finally { setBusy(false); }
+  };
+
+  const toggle = async (share, id) => {
+    const modules = share.modules.includes(id) ? share.modules.filter(m => m !== id) : [...share.modules, id];
+    setMine(list => modules.length
+      ? list.map(s => (s.viewer === share.viewer ? { ...s, modules } : s))
+      : list.filter(s => s.viewer !== share.viewer));
+    try { await save(share.viewer, modules); } catch (err) { onToast(err.message); load(); }
+  };
+
+  const stop = async (share) => {
+    setMine(list => list.filter(s => s.viewer !== share.viewer));
+    try { await save(share.viewer, []); onToast(`Stopped sharing with ${share.viewer}`); } catch (err) { onToast(err.message); load(); }
+  };
+
+  const labels = (modules) => SHARE_MODULES.filter(([id]) => modules.includes(id)).map(([, icon, label]) => `${icon} ${label}`).join('  ·  ');
+
+  return (
+    <div className="st-card">
+      <form className="st-share-add" onSubmit={add}>
+        <div className="st-inline-form">
+          <input
+            type="email" value={email} placeholder="Friend's email" aria-label="Friend's email"
+            onChange={e => { setEmail(e.target.value); setError(''); }}
+          />
+          <button className="action-btn" type="submit" disabled={busy || !email.trim()}>{busy ? 'Sharing…' : 'Share'}</button>
+        </div>
+        <ModuleChips value={picked} onToggle={id => setPicked(p => (p.includes(id) ? p.filter(m => m !== id) : [...p, id]))} />
+        {error && <span className="st-hint error">{error}</span>}
+      </form>
+
+      {mine && mine.length > 0 && (
+        <>
+          <div className="st-subhead">They can view</div>
+          <div className="st-share-list">
+            {mine.map(share => (
+              <div key={share.viewer} className="st-share-row">
+                <div className="st-share-head">
+                  <span className="st-avatar sm">{share.viewer[0].toUpperCase()}</span>
+                  <b>{share.viewer}</b>
+                  <button className="st-share-x" onClick={() => stop(share)} aria-label={`Stop sharing with ${share.viewer}`}>×</button>
+                </div>
+                <ModuleChips value={share.modules} onToggle={id => toggle(share, id)} />
+              </div>
+            ))}
+          </div>
+        </>
+      )}
+
+      {withMe.length > 0 && (
+        <>
+          <div className="st-subhead">Shared with you</div>
+          <div className="st-share-list">
+            {withMe.map(share => (
+              <div key={share.owner} className="st-share-row inline">
+                <span className="st-avatar sm">{share.owner[0].toUpperCase()}</span>
+                <div className="st-row-text">
+                  <b>{share.owner}</b>
+                  <span>{labels(share.modules)}</span>
+                </div>
+                {viewAs === share.owner
+                  ? <span className="st-muted">Viewing</span>
+                  : <button className="action-btn secondary" onClick={() => onSwitchView(share.owner)}>View</button>}
+              </div>
+            ))}
+          </div>
+        </>
+      )}
     </div>
   );
 }

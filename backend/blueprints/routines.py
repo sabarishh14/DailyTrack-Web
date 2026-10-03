@@ -19,6 +19,7 @@ import routines_engine as rules
 from extensions import db
 from models import Routine, RoutineCheckIn
 from access import require_access, current_access
+from tenancy import data_owner
 
 routines_bp = Blueprint("routines", __name__)
 
@@ -34,8 +35,11 @@ MAX_BATCH = 500
 
 
 def _owner():
-    """The signed-in person's email, or None for the service key."""
-    return (current_access().email or "").strip().lower() or None
+    """Whose routines: the signed-in person's, or someone's shared with them
+    (read-only, enforced in access.py). None for the service key."""
+    if current_access().email is None:
+        return None
+    return (data_owner() or "").strip().lower() or None
 
 
 def _no_person():

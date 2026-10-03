@@ -19,12 +19,15 @@ import LoginPage from './components/LoginPage';
 import LoadingScreen from './components/LoadingScreen';
 import AccessControlModal from './components/AccessControlModal';
 import { AccessProvider, buildAccess, loadStoredAccess, storeAccess, canOpenTab, claimBrowserFor } from './access/AccessContext';
+import { getViewAs, setViewAs as storeViewAs, installViewAsFetch } from './access/viewAs';
 import GlobalSearchModal from './components/GlobalSearchModal';
 import EditTransactionModal from './components/EditTransactionModal';
 import FloatingChatWidget from './components/FloatingChatWidget';
 import Sidebar from './components/layout/Sidebar';
 import TopBar from './components/layout/TopBar';
 import MobileBottomNav from './components/layout/MobileBottomNav';
+
+installViewAsFetch(API);
 
 // Turns a 401 into the message shown on the login screen.
 const revokedNotice = async (res) => {
@@ -40,6 +43,14 @@ export default function App() {
   const [appLoading, setAppLoading] = useState(!!localStorage.getItem('dt_token'));
   const [tab, setTab] = useState(0);
   const [isRefreshing, setIsRefreshing] = useState(false);
+  // Whose data is on screen: null = your own, else someone who shared with you (read-only).
+  const [viewAs, setViewAsState] = useState(getViewAs);
+  const [sharedWithMe, setSharedWithMe] = useState([]);
+  const [pendingRequests, setPendingRequests] = useState(0);
+  const switchView = useCallback((email) => {
+    storeViewAs(email || null);
+    setViewAsState(email || null);
+  }, []);
 
   // 🚀 GLOBAL SEARCH STATES
   const [isSearchOpen, setIsSearchOpen] = useState(false);
@@ -210,6 +221,8 @@ const [categories, setCategories] = useState([]);
     localStorage.removeItem('dt_token');
     localStorage.removeItem('dt_is_admin'); // <-- ADD THIS LINE
     storeAccess(null);
+    storeViewAs(null);
+    setViewAsState(null);
     setAccessRaw(null);
     setAuthNotice(typeof notice === 'string' ? notice : '');
     setIsLoggedIn(false);
@@ -233,13 +246,17 @@ setAccounts([]);
     try {
       const r = await fetch(`${API}/auth/me`, { headers: { 'Authorization': `Bearer ${getToken()}` } });
       if (r.status === 401) return logout(await revokedNotice(r));
+      // No longer shared with you: back to your own data.
+      if (r.status === 403 && getViewAs()) return switchView(null);
       const res = await r.json();
       if (res.success) {
         setAccessRaw(prev => JSON.stringify(prev) === JSON.stringify(res.access) ? prev : res.access);
         storeAccess(res.access);
+        setSharedWithMe(prev => JSON.stringify(prev) === JSON.stringify(res.shared_with_me || []) ? prev : (res.shared_with_me || []));
+        setPendingRequests(res.pending_requests || 0);
       }
     } catch { /* offline or server waking up: keep the last known access */ }
-  }, [logout]);
+  }, [logout, switchView]);
 
   useEffect(() => {
     if (!isLoggedIn) return;
@@ -341,6 +358,10 @@ setAccounts([]);
           logout(await revokedNotice(r));
           throw new Error("UNAUTHORIZED");
         }
+        if (r.status === 403 && getViewAs()) {
+          switchView(null); // reloads your own data
+          throw new Error("VIEW_REVOKED");
+        }
         if (!r.ok) throw new Error(`Server waking up: ${r.status}`);
         if (showLoading) addLog(`${name} loaded OK.`);
         return r.json();
@@ -361,6 +382,8 @@ setAccounts([]);
       claimBrowserFor(acl.email);
       setAccessRaw(me.access);
       storeAccess(me.access);
+      setSharedWithMe(me.shared_with_me || []);
+      setPendingRequests(me.pending_requests || 0);
       if (showLoading) setLbxUsername(me.settings?.letterboxd_username || '');
 
       if (showLoading) addLog("Connecting to LifeTrack database...");
@@ -398,6 +421,7 @@ when(invest, `${API}/assets/list`, 'Market Symbols', {}),
         setAppLoading(false);
         return;
       }
+      if (e.message === "VIEW_REVOKED") return;
       if (showLoading) {
         addLog(`Server unavailable (${e.message.split(':')[0] || 'timeout'}). Retrying in 3s... (Attempt ${attempt}/5)`);
       }
@@ -411,9 +435,18 @@ when(invest, `${API}/assets/list`, 'Market Symbols', {}),
       // The loading screen stays up, and we try again automatically!
       setTimeout(() => fetchAll(showLoading, attempt + 1), 3000);
     }
-  }, [logout]);
+  }, [logout, switchView]);
 
   useEffect(() => { if (isLoggedIn) fetchAll(true); }, [fetchAll, isLoggedIn]);
+
+  // Switching whose data is on screen: start over on Home with theirs (or yours).
+  const viewAsLoaded = useRef(viewAs);
+  useEffect(() => {
+    if (!isLoggedIn || viewAsLoaded.current === viewAs) return;
+    viewAsLoaded.current = viewAs;
+    setTab(0);
+    fetchAll(true);
+  }, [viewAs, isLoggedIn, fetchAll]);
 
 const today = new Date();
   const dateStr = today.toLocaleDateString('en-IN', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
@@ -456,6 +489,9 @@ const today = new Date();
             toggleNagapandi={toggleNagapandi}
             onOpenAccessControl={() => setIsSecretMenuOpen(true)}
             logout={logout}
+            viewAs={viewAs}
+            sharedWithMe={sharedWithMe}
+            onSwitchView={switchView}
           />
         )}
       </>
@@ -507,7 +543,18 @@ const today = new Date();
           onOpenSettings={() => setTab(SETTINGS_TAB)}
           onOpenAccessControl={() => setIsSecretMenuOpen(true)}
           logout={logout}
+          viewAs={viewAs}
+          sharedWithMe={sharedWithMe}
+          onSwitchView={switchView}
+          pendingRequests={pendingRequests}
         />
+        {viewAs && (
+          <div className="view-banner" role="status">
+            <span className="view-banner-eye" aria-hidden="true">👀</span>
+            <span className="view-banner-text"><b>{viewAs}</b><span> · view only</span></span>
+            <button onClick={() => switchView(null)}>Back to mine</button>
+          </div>
+        )}
         <main className="page-body">
           {renderTab()}
         </main>

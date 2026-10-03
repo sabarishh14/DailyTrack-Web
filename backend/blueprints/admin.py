@@ -61,11 +61,48 @@ def _validate(email, role):
 def list_users():
     ensure_access_schema()
     rows = AllowedEmail.query.order_by(AllowedEmail.added_on.asc()).all()
+    allowed = {_clean_email(r.email) for r in rows} | OWNER_EMAILS
+    requests_ = [r for r in AccessRequest.query.order_by(AccessRequest.requested_at.desc()).all()
+                 if _clean_email(r.email) not in allowed]
     return jsonify({
         "success": True,
         "owners": sorted(OWNER_EMAILS),
         "users": [_serialize(r) for r in rows if _clean_email(r.email) not in OWNER_EMAILS],
+        "requests": [{"email": r.email, "name": r.name,
+                      "requested_on": r.requested_at.isoformat() if r.requested_at else None} for r in requests_],
     })
+
+
+def _drop_request(email):
+    row = db.session.get(AccessRequest, email)
+    if row is not None:
+        db.session.delete(row)
+
+
+@admin_bp.route('/api/admin/requests/<path:email>/approve', methods=['POST'])
+@require_admin
+def approve_request(email):
+    """Lets someone who asked sign in, as a member with their own data."""
+    ensure_access_schema()
+    email = _clean_email(email)
+    if not _find(email) and email not in OWNER_EMAILS:
+        row = AllowedEmail(email=email)
+        row.role = "member"
+        row.permissions = normalize_permissions(VIEWER_PERMISSIONS)
+        row.updated_on = datetime.utcnow()
+        db.session.add(row)
+    _drop_request(email)
+    db.session.commit()
+    invalidate_access(email)
+    return jsonify({"success": True})
+
+
+@admin_bp.route('/api/admin/requests/<path:email>', methods=['DELETE'])
+@require_admin
+def decline_request(email):
+    _drop_request(_clean_email(email))
+    db.session.commit()
+    return jsonify({"success": True})
 
 
 @admin_bp.route('/api/admin/access-options', methods=['GET'])
@@ -102,6 +139,7 @@ def create_user():
     row.permissions = normalize_permissions(data.get('permissions') or VIEWER_PERMISSIONS)
     row.updated_on = datetime.utcnow()
     db.session.add(row)
+    _drop_request(email)
     db.session.commit()
     invalidate_access(email)
     return jsonify({"success": True, "user": _serialize(row)})

@@ -33,7 +33,7 @@ CORS(app, resources={
     r"/api/*": {
         "origins": ALLOWED_ORIGINS,
         "methods": ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
-        "allow_headers": ["Content-Type", "X-API-KEY", "Authorization"],
+        "allow_headers": ["Content-Type", "X-API-KEY", "Authorization", "X-View-As"],
         "supports_credentials": False,
         "max_age": 3600
     }
