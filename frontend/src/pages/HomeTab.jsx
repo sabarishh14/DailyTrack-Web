@@ -252,8 +252,8 @@ const [showInvestments, setShowInvestments] = useState(false);
                   </div>
                   <div className="acc-balance">
                     {!showBalances ? '₹ ••••••' : card ? (used > 0 ? `−${fmt(used)}` : fmt(0)) : fmt(a.balance)}
+                    {showBalances && card && <span className="acc-caption">this month</span>}
                   </div>
-                  {showBalances && card && <div className="acc-caption">Used this month</div>}
                   {showBalances && (card
                     ? <CardBudgetChip account={a.account} budget={a.monthly_budget} used={used} editable={fullMoney} onSaved={onRefresh} />
                     : <MinBalanceChip account={a.account} min={a.min_balance} editable={fullMoney} onSaved={onRefresh} />)}

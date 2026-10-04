@@ -7642,7 +7642,14 @@ input[type="date"]::-webkit-calendar-picker-indicator {
 .account-card.floor-danger { border-left-color: var(--neg); background: rgba(248, 113, 113, 0.06); }
 .account-card.floor-danger .acc-balance { color: var(--neg); }
 /* A card's amount is this month's spending, so it says so. */
-.acc-caption { font-size: 0.7rem; color: var(--text3); margin-top: -0.15rem; }
+.acc-caption {
+  margin-left: 0.35rem;
+  font-family: 'DM Sans', sans-serif;
+  font-size: 0.68rem;
+  font-weight: 500;
+  color: var(--text3);
+  white-space: nowrap;
+}
 .st-card-used {
   display: flex;
   flex-direction: column;
