@@ -4074,6 +4074,70 @@ input[type="date"]::-webkit-calendar-picker-indicator {
   color: #fff;
 }
 
+/* Active Library filters as removable chips (what a Stats bar jumped to). */
+.tv-active-filters {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+  margin: -0.5rem 0 1.25rem;
+  animation: tvChipsIn 0.25s ease both;
+}
+
+.tv-active-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  padding: 0.35rem 0.55rem 0.35rem 0.8rem;
+  border-radius: 999px;
+  background: rgba(var(--accent-rgb), 0.15);
+  border: 1px solid rgba(var(--accent-rgb), 0.45);
+  color: var(--accent-text);
+  font-family: 'DM Sans', sans-serif;
+  font-size: 0.78rem;
+  font-weight: 600;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background 0.15s ease, border-color 0.15s ease;
+}
+
+.tv-active-chip:hover {
+  background: rgba(var(--accent-rgb), 0.25);
+  border-color: var(--accent);
+}
+
+.tv-active-chip-x {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  font-size: 0.55rem;
+  background: rgba(var(--accent-rgb), 0.25);
+}
+
+.tv-active-clear {
+  background: none;
+  border: none;
+  padding: 0.35rem 0.25rem;
+  color: var(--text3);
+  font-family: 'DM Sans', sans-serif;
+  font-size: 0.78rem;
+  cursor: pointer;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+.tv-active-clear:hover {
+  color: var(--text);
+}
+
+@keyframes tvChipsIn {
+  from { opacity: 0; transform: translateY(-4px); }
+  to { opacity: 1; transform: none; }
+}
+
 [data-theme="light"] .tv-filter-pill {
   background: var(--card);
   border-color: var(--border);
@@ -6300,6 +6364,94 @@ input[type="date"]::-webkit-calendar-picker-indicator {
   font-weight: 600;
 }
 
+/* ─── FINESSE: bars grow in, the busiest stands out, every bar is a link ─── */
+.stats-grow {
+  transform-origin: bottom;
+  animation: statsBarGrow 0.7s cubic-bezier(0.2, 0.8, 0.2, 1) both;
+  animation-delay: var(--grow-delay, 0ms);
+}
+
+@keyframes statsBarGrow {
+  from { transform: scaleY(0); }
+  to { transform: scaleY(1); }
+}
+
+.stats-week-bar.is-peak,
+.stats-month-bar.is-peak {
+  background: linear-gradient(to top, rgba(var(--accent2-rgb), 1), rgba(var(--accent-rgb), 1));
+  box-shadow: 0 0 14px rgba(var(--accent-rgb), 0.45);
+}
+
+.stats-day-bar.is-peak {
+  background: linear-gradient(to top, rgba(var(--accent2-rgb), 0.9), rgba(var(--accent-rgb), 1));
+}
+
+.stats-week-bar.is-clickable,
+.is-clickable {
+  cursor: pointer;
+}
+
+/* Hovering the week chart dims the other weeks so the one under the cursor reads clearly. */
+.stats-week-bars:hover .stats-week-bar:not(:hover) {
+  opacity: 0.55;
+}
+
+.stats-month-bar-wrap.is-clickable:hover .stats-month-label,
+.stats-day-bar-wrap.is-clickable:hover .stats-day-label,
+.stats-rating-bar-wrap.is-clickable:hover .stats-rating-label {
+  color: var(--accent-text);
+}
+
+.stats-day-bar-wrap.is-clickable:hover .stats-day-bar {
+  filter: brightness(1.25);
+}
+
+.stats-day-bar-wrap.is-clickable .stats-day-bar,
+.stats-rating-bar-wrap.is-clickable .stats-rating-bar,
+.stats-month-bar-wrap.is-clickable .stats-month-bar {
+  cursor: pointer;
+}
+
+.stats-section-hint.is-live {
+  color: var(--accent-text);
+  font-weight: 600;
+}
+
+/* Letterboxd-style title on hover, kept off the art otherwise. */
+.stats-poster-hover-name {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  padding: 1.6rem 0.45rem 0.45rem;
+  background: linear-gradient(to top, rgba(0, 0, 0, 0.85), transparent);
+  color: #fff;
+  font-size: 0.7rem;
+  font-weight: 600;
+  line-height: 1.25;
+  text-align: center;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  opacity: 0;
+  transform: translateY(6px);
+  transition: opacity 0.2s ease, transform 0.2s ease;
+  pointer-events: none;
+}
+
+.stats-poster-img-wrap:hover .stats-poster-hover-name {
+  opacity: 1;
+  transform: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .stats-grow,
+  .tv-active-filters {
+    animation: none;
+  }
+}
+
 @media (max-width: 768px) {
   .stats-media-divider {
     margin: 2.25rem 0 1.25rem;
@@ -6308,6 +6460,15 @@ input[type="date"]::-webkit-calendar-picker-indicator {
 
   .stats-section-hint {
     display: none;
+  }
+
+  /* The week's dates are the point of the By Week hint, so it stays. */
+  .stats-section-hint.keep {
+    display: inline;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    font-size: 0.7rem;
   }
 }
 

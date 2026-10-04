@@ -1,4 +1,5 @@
-import { useMemo } from 'react';
+import { CountUp, DayChart, RatingChart, WeekChart } from './StatsCharts';
+import { MONTHS_LONG, peakIndex, plural } from './statsFormat';
 
 // ═══════════════════════════════════════════════════════════════════════
 // TV STATS — the TV counterpart to the movie sections in StatsView.
@@ -7,10 +8,6 @@ import { useMemo } from 'react';
 
 const TMDB_IMG = 'https://image.tmdb.org/t/p';
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
-const DAYS = ['M', 'T', 'W', 'T', 'F', 'S', 'S'];
-const RATING_KEYS = ['0.5', '1.0', '1.5', '2.0', '2.5', '3.0', '3.5', '4.0', '4.5', '5.0'];
-
-const plural = (n, one, many) => `${n} ${n === 1 ? one : many}`;
 
 const shortDate = (iso) => {
   if (!iso) return '';
@@ -37,6 +34,7 @@ function PosterTile({ show, badge, caption, onOpen, children }) {
           <div className="stats-no-poster">📺</div>
         )}
         {badge != null && <div className="stats-poster-badge">{badge}</div>}
+        <span className="stats-poster-hover-name">{show.name}</span>
       </div>
       {children}
       {caption && <div className="stats-poster-name">{caption}</div>}
@@ -64,17 +62,12 @@ export default function TvStatsSections({ data, statsYear, openModal, onFilterLi
     id: s.show_id, tmdb_id: s.tmdb_id, type: 'tv', name: s.name, poster_path: s.poster_path, status: s.status,
   });
 
-  const ratingValues = useMemo(
-    () => RATING_KEYS.map(k => d.rating_distribution?.[k] || d.rating_distribution?.[String(parseFloat(k))] || 0),
-    [d.rating_distribution]
-  );
-
   const hasActivity = d.total_entries > 0;
-  const maxWeek = Math.max(...(d.by_week || []), 1);
   const maxMonth = Math.max(...(d.by_month || []), 1);
-  const maxDay = Math.max(...(d.by_day || []), 1);
-  const maxRating = Math.max(...ratingValues, 1);
+  const peakMonth = peakIndex(d.by_month || []);
   const maxYear = Math.max(...(d.episodes_by_year || []).map(y => y.count), 1);
+  // Every chart bar opens the Library on exactly what it counted.
+  const filterTo = onFilterLibrary ? (slice) => onFilterLibrary({ year: statsYear, mediaType: 'tv', ...slice }) : null;
   const maxLanguage = Math.max(...(d.shows_by_language || []).map(l => l.count), 1);
 
   const highlights = [
@@ -98,19 +91,21 @@ export default function TvStatsSections({ data, statsYear, openModal, onFilterLi
       {/* ─── SUMMARY COUNTERS ─── */}
       <div className="stats-counters">
         <div className="stats-counter-card">
-          <div className="stats-counter-value">{d.episodes_watched}</div>
+          <div className="stats-counter-value"><CountUp value={d.episodes_watched} /></div>
           <div className="stats-counter-label">Episodes</div>
         </div>
         <div className="stats-counter-card">
-          <div className="stats-counter-value">{d.shows_watched}</div>
+          <div className="stats-counter-value"><CountUp value={d.shows_watched} /></div>
           <div className="stats-counter-label">Shows</div>
         </div>
         <div className="stats-counter-card">
-          <div className="stats-counter-value">{d.shows_completed}</div>
+          <div className="stats-counter-value"><CountUp value={d.shows_completed} /></div>
           <div className="stats-counter-label">Completed</div>
         </div>
         <div className="stats-counter-card">
-          <div className="stats-counter-value">{d.average_rating != null ? `★ ${d.average_rating.toFixed(1)}` : '—'}</div>
+          <div className="stats-counter-value">
+            {d.average_rating != null ? <>★ <CountUp value={d.average_rating} decimals={1} /></> : '—'}
+          </div>
           <div className="stats-counter-label">Avg Rating</div>
         </div>
       </div>
@@ -209,25 +204,13 @@ export default function TvStatsSections({ data, statsYear, openModal, onFilterLi
           )}
 
           {/* ─── BY WEEK ─── */}
-          <Section icon="📈" title="By Week">
-            <div className="stats-week-chart">
-              <div className="stats-week-bars">
-                {d.by_week.map((count, i) => (
-                  <div
-                    key={i}
-                    className="stats-week-bar"
-                    style={{ height: count > 0 ? `${Math.max(4, (count / maxWeek) * 100)}%` : '0', cursor: onFilterLibrary ? 'pointer' : 'default' }}
-                    data-count={`W${i + 1}: ${plural(count, 'episode', 'episodes')}`}
-                    onClick={() => onFilterLibrary && onFilterLibrary({ year: statsYear, week: i + 1, mediaType: 'tv' })}
-                    title={onFilterLibrary ? `See shows watched in week ${i + 1}` : undefined}
-                  />
-                ))}
-              </div>
-              <div className="stats-week-labels">
-                <span>Jan</span><span>Apr</span><span>Jul</span><span>Oct</span><span>Dec</span>
-              </div>
-            </div>
-          </Section>
+          <WeekChart
+            byWeek={d.by_week}
+            year={statsYear}
+            one="episode"
+            many="episodes"
+            onOpenWeek={filterTo && (week => filterTo({ week }))}
+          />
 
           {/* ─── EPISODES BY YEAR (all time) ─── */}
           {statsYear === 'all' && d.episodes_by_year?.length > 0 && (
@@ -244,7 +227,7 @@ export default function TvStatsSections({ data, statsYear, openModal, onFilterLi
                     >
                       <div className="stats-month-count">{item.count > 0 ? item.count : ''}</div>
                       <div
-                        className="stats-month-bar"
+                        className="stats-month-bar stats-grow"
                         style={{ height: item.count > 0 ? `${Math.max(6, (item.count / maxYear) * 100)}%` : '4px' }}
                         data-count={`${item.year}: ${plural(item.count, 'episode', 'episodes')}`}
                       />
@@ -287,21 +270,20 @@ export default function TvStatsSections({ data, statsYear, openModal, onFilterLi
           )}
 
           {/* ─── BY MONTH ─── */}
-          <Section icon="📊" title="By Month">
+          <Section icon="📊" title="By Month" hint={peakMonth >= 0 ? `Busiest: ${MONTHS_LONG[peakMonth]}` : null}>
             <div className="stats-month-chart">
               <div className="stats-month-bars">
                 {d.by_month.map((count, i) => (
                   <div
                     key={i}
-                    className="stats-month-bar-wrap"
-                    style={{ cursor: onFilterLibrary ? 'pointer' : 'default' }}
-                    onClick={() => onFilterLibrary && onFilterLibrary({ year: statsYear, month: i + 1, mediaType: 'tv' })}
-                    title={onFilterLibrary ? `See shows watched in ${MONTHS[i]}` : undefined}
+                    className={`stats-month-bar-wrap ${filterTo && count > 0 ? 'is-clickable' : ''}`}
+                    onClick={() => filterTo && count > 0 && filterTo({ month: i + 1 })}
+                    title={filterTo && count > 0 ? `See shows watched in ${MONTHS_LONG[i]}` : undefined}
                   >
                     <div className="stats-month-count">{count > 0 ? count : ''}</div>
                     <div
-                      className="stats-month-bar"
-                      style={{ height: count > 0 ? `${Math.max(6, (count / maxMonth) * 100)}%` : '4px' }}
+                      className={`stats-month-bar stats-grow ${i === peakMonth ? 'is-peak' : ''}`}
+                      style={{ height: count > 0 ? `${Math.max(6, (count / maxMonth) * 100)}%` : '4px', '--grow-delay': `${i * 30}ms` }}
                       data-count={`${MONTHS[i]}: ${plural(count, 'episode', 'episodes')}`}
                     />
                     <span className="stats-month-label">{MONTHS[i]}</span>
@@ -315,17 +297,17 @@ export default function TvStatsSections({ data, statsYear, openModal, onFilterLi
           <div className="stats-section">
             <div className="stats-averages">
               <div className="stats-avg-item">
-                <div className="stats-avg-value">{d.episodes_watched}</div>
+                <div className="stats-avg-value"><CountUp value={d.episodes_watched} /></div>
                 <div className="stats-avg-label">Episodes logged</div>
               </div>
               <span className="stats-avg-arrow">→</span>
               <div className="stats-avg-item">
-                <div className="stats-avg-value">{d.avg_per_month}</div>
+                <div className="stats-avg-value"><CountUp value={d.avg_per_month} decimals={1} /></div>
                 <div className="stats-avg-label">Average per month</div>
               </div>
               <span className="stats-avg-arrow">→</span>
               <div className="stats-avg-item">
-                <div className="stats-avg-value">{d.avg_per_week}</div>
+                <div className="stats-avg-value"><CountUp value={d.avg_per_week} decimals={1} /></div>
                 <div className="stats-avg-label">Average per week</div>
               </div>
             </div>
@@ -333,40 +315,8 @@ export default function TvStatsSections({ data, statsYear, openModal, onFilterLi
 
           {/* ─── BOTTOM GRID ─── */}
           <div className="stats-bottom-grid">
-            <div>
-              <div className="stats-section-header">
-                <span className="stats-section-title">📅 By Day</span>
-              </div>
-              <div className="stats-day-chart">
-                {d.by_day.map((count, i) => (
-                  <div key={i} className="stats-day-bar-wrap">
-                    <div
-                      className={`stats-day-bar ${i >= 5 ? 'weekend' : ''}`}
-                      style={{ height: count > 0 ? `${Math.max(4, (count / maxDay) * 80)}px` : '4px' }}
-                      data-count={plural(count, 'episode', 'episodes')}
-                    />
-                    <span className="stats-day-label">{DAYS[i]}</span>
-                  </div>
-                ))}
-              </div>
-            </div>
-            <div>
-              <div className="stats-section-header">
-                <span className="stats-section-title">⭐ Ratings</span>
-              </div>
-              <div className="stats-rating-chart">
-                {RATING_KEYS.map((k, i) => (
-                  <div key={k} className="stats-rating-bar-wrap">
-                    <div
-                      className="stats-rating-bar"
-                      style={{ height: ratingValues[i] > 0 ? `${Math.max(4, (ratingValues[i] / maxRating) * 80)}px` : '4px' }}
-                      data-count={plural(ratingValues[i], 'rating', 'ratings')}
-                    />
-                    <span className="stats-rating-label">{k.replace('.0', '').replace('.5', '½')}</span>
-                  </div>
-                ))}
-              </div>
-            </div>
+            <DayChart byDay={d.by_day} one="episode" many="episodes" onOpenDay={filterTo && (weekday => filterTo({ weekday }))} />
+            <RatingChart distribution={d.rating_distribution} onOpenRating={filterTo && (rating => filterTo({ rating }))} />
           </div>
         </>
       )}

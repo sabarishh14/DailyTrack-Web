@@ -2,6 +2,7 @@ import { useState, useEffect, useRef, useCallback, useMemo, memo } from 'react';
 import CustomSelect from '../components/CustomSelect';
 import { StarRating, StarDisplay } from './sabdekho-components/StarRating';
 import StatsView from './sabdekho-components/StatsView';
+import { MONTHS_LONG, WEEKDAYS_LONG, weekLabel, starsLabel } from './sabdekho-components/statsFormat';
 import { useAccess } from '../access/AccessContext';
 
 const TMDB_IMG = 'https://image.tmdb.org/t/p';
@@ -78,9 +79,17 @@ const [view, setView] = useState('library'); // library | diary | stats
   const [monthFilter, setMonthFilter] = useState('all');
   const [weekFilter, setWeekFilter] = useState('all');
   const [languageFilter, setLanguageFilter] = useState('all');
+  // Set by the Stats "By Day" and "Ratings" bars: a day of the week (0 = Monday) and a log's rating.
+  const [weekdayFilter, setWeekdayFilter] = useState('all');
+  const [ratingFilter, setRatingFilter] = useState('all');
   const [showMoreFilters, setShowMoreFilters] = useState(false);
   const [filterOptions, setFilterOptions] = useState(null); // { years, languages } — lazy-loaded
-  const hasActiveLibraryFilters = yearFilter !== 'all' || monthFilter !== 'all' || weekFilter !== 'all' || languageFilter !== 'all';
+  const hasActiveLibraryFilters = [yearFilter, monthFilter, weekFilter, languageFilter, weekdayFilter, ratingFilter].some(f => f !== 'all');
+  const clearLibraryFilters = () => {
+    setYearFilter('all'); setMonthFilter('all'); setWeekFilter('all');
+    setLanguageFilter('all'); setWeekdayFilter('all'); setRatingFilter('all');
+  };
+  const trackerRef = useRef(null);
 
   // Poster size — remembered across visits, like theme/accent.
   const [posterSize, setPosterSize] = useState(() => localStorage.getItem('dt_poster_size') || 'medium');
@@ -106,7 +115,7 @@ const [view, setView] = useState('library'); // library | diary | stats
   useEffect(() => {
     setShowsPage(1);
     setDiaryPage(1);
-  }, [mediaType, statusFilter, yearFilter, monthFilter, weekFilter, languageFilter, view, showMovies]);
+  }, [mediaType, statusFilter, yearFilter, monthFilter, weekFilter, languageFilter, weekdayFilter, ratingFilter, view, showMovies]);
 
   // Reset media type if movies are disabled while in movie mode
   useEffect(() => {
@@ -129,14 +138,14 @@ const [view, setView] = useState('library'); // library | diary | stats
     try {
       // Determine what to ask the backend based on toggles
       const typeParam = mediaType === 'all' ? (showMovies ? 'all' : 'tv') : mediaType;
-      const r = await fetch(`${API}/media/library?limit=${ITEMS_PER_PAGE}&offset=${(showsPage - 1) * ITEMS_PER_PAGE}&type=${typeParam}&status=${statusFilter}&year=${yearFilter}&month=${monthFilter}&week=${weekFilter}&language=${languageFilter}`, { headers: hdrs() });
+      const r = await fetch(`${API}/media/library?limit=${ITEMS_PER_PAGE}&offset=${(showsPage - 1) * ITEMS_PER_PAGE}&type=${typeParam}&status=${statusFilter}&year=${yearFilter}&month=${monthFilter}&week=${weekFilter}&language=${languageFilter}&weekday=${weekdayFilter}&rating=${ratingFilter}`, { headers: hdrs() });
       const data = await r.json();
       if (data.success) {
         setShows(data.shows || []);
         setShowsTotalCount(data.total_count || 0);
       }
     } catch (e) { console.error(e); }
-  }, [API, hdrs, showMovies, mediaType, statusFilter, yearFilter, monthFilter, weekFilter, languageFilter, showsPage]);
+  }, [API, hdrs, showMovies, mediaType, statusFilter, yearFilter, monthFilter, weekFilter, languageFilter, weekdayFilter, ratingFilter, showsPage]);
 
   const fetchFilterOptions = useCallback(async () => {
     try {
@@ -148,17 +157,22 @@ const [view, setView] = useState('library'); // library | diary | stats
 
   // Jump here from a Stats chart bar. Each click is a fresh, complete slice —
   // any dimension it doesn't mention (month/week/language/...) resets to 'all'
-  // rather than merging with whatever was already set in the Library.
-  const handleFilterLibrary = useCallback(({ year, month, week, language, mediaType: mt }) => {
+  // rather than merging with whatever was already set in the Library. The
+  // slice shows as chips above the grid; the filter panel stays as it was.
+  const handleFilterLibrary = useCallback(({ year, month, week, language, weekday, rating, mediaType: mt }) => {
     if (!filterOptions) fetchFilterOptions();
-    setYearFilter(year != null && year !== 'all' ? String(year) : 'all');
-    setMonthFilter(month != null && month !== 'all' ? String(month) : 'all');
-    setWeekFilter(week != null && week !== 'all' ? String(week) : 'all');
+    const facet = v => (v != null && v !== 'all' ? String(v) : 'all');
+    setYearFilter(facet(year));
+    setMonthFilter(facet(month));
+    setWeekFilter(facet(week));
     setLanguageFilter(language || 'all');
+    setWeekdayFilter(facet(weekday));
+    setRatingFilter(facet(rating));
     if (mt) setMediaType(mt);
     setStatusFilter('all');
-    setShowMoreFilters(true);
     setView('library');
+    // The bar may have been far down the Stats page.
+    requestAnimationFrame(() => trackerRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }));
   }, [filterOptions, fetchFilterOptions]);
 
   const fetchDiary = useCallback(async () => {
@@ -709,7 +723,7 @@ const [view, setView] = useState('library'); // library | diary | stats
 
   // 🎨 RENDER 🎨
   return (
-    <div className="tv-tracker">
+    <div className="tv-tracker" ref={trackerRef}>
       {/* NAV */}
       <div className="tv-header">
         <div className="tv-header-left">
@@ -878,8 +892,22 @@ const [view, setView] = useState('library'); // library | diary | stats
                 icon="📈"
                 value={weekFilter}
                 onChange={setWeekFilter}
-                options={[{ value: 'all', label: 'All Weeks' }, ...Array.from({ length: 52 }, (_, i) => ({ value: String(i + 1), label: `Week ${i + 1}` }))]}
-                minWidth="110px"
+                options={[{ value: 'all', label: 'All Weeks' }, ...Array.from({ length: 52 }, (_, i) => ({ value: String(i + 1), label: weekLabel(yearFilter, i + 1) }))]}
+                minWidth={yearFilter === 'all' ? '110px' : '170px'}
+              />
+              <CustomSelect
+                icon="🗓️"
+                value={weekdayFilter}
+                onChange={setWeekdayFilter}
+                options={[{ value: 'all', label: 'Any Day' }, ...WEEKDAYS_LONG.map((d, i) => ({ value: String(i), label: d }))]}
+                minWidth="120px"
+              />
+              <CustomSelect
+                icon="⭐"
+                value={ratingFilter}
+                onChange={setRatingFilter}
+                options={[{ value: 'all', label: 'Any Rating' }, ...['5.0', '4.5', '4.0', '3.5', '3.0', '2.5', '2.0', '1.5', '1.0', '0.5'].map(r => ({ value: r, label: starsLabel(r) }))]}
+                minWidth="120px"
               />
               <CustomSelect
                 icon="🌐"
@@ -889,10 +917,34 @@ const [view, setView] = useState('library'); // library | diary | stats
                 minWidth="140px"
               />
               {hasActiveLibraryFilters && (
-                <button className="tv-filter-pill" onClick={() => { setYearFilter('all'); setMonthFilter('all'); setWeekFilter('all'); setLanguageFilter('all'); }}>
+                <button className="tv-filter-pill" onClick={clearLibraryFilters}>
                   ✕ Clear
                 </button>
               )}
+            </div>
+          )}
+
+          {/* The active slice as removable chips — how a Stats jump shows what it filtered. */}
+          {!showMoreFilters && hasActiveLibraryFilters && (
+            <div className="tv-active-filters">
+              {[
+                yearFilter !== 'all' && { key: 'year', label: yearFilter, clear: () => setYearFilter('all') },
+                monthFilter !== 'all' && { key: 'month', label: MONTHS_LONG[Number(monthFilter) - 1] || monthFilter, clear: () => setMonthFilter('all') },
+                weekFilter !== 'all' && { key: 'week', label: weekLabel(yearFilter, Number(weekFilter)), clear: () => setWeekFilter('all') },
+                weekdayFilter !== 'all' && { key: 'weekday', label: `${WEEKDAYS_LONG[Number(weekdayFilter)] || weekdayFilter}s`, clear: () => setWeekdayFilter('all') },
+                ratingFilter !== 'all' && { key: 'rating', label: `Rated ${starsLabel(ratingFilter)}`, clear: () => setRatingFilter('all') },
+                languageFilter !== 'all' && {
+                  key: 'language',
+                  label: filterOptions?.languages?.find(l => l.code === languageFilter)?.label || languageFilter.toUpperCase(),
+                  clear: () => setLanguageFilter('all'),
+                },
+              ].filter(Boolean).map(chip => (
+                <button key={chip.key} className="tv-active-chip" onClick={chip.clear} title="Remove this filter">
+                  {chip.label}
+                  <span className="tv-active-chip-x" aria-hidden="true">✕</span>
+                </button>
+              ))}
+              <button className="tv-active-clear" onClick={clearLibraryFilters}>Clear all</button>
             </div>
           )}
 

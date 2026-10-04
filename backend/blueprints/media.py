@@ -1907,23 +1907,29 @@ def _iso_week_bucket(d):
     return 52 if wk == 53 else wk
 
 
-def _diary_filtered_ids(rows, year_filter, month_filter, week_filter):
+def _diary_filtered_ids(rows, year_filter, month_filter, week_filter, weekday_filter='all', rating_filter='all'):
     """
-    rows: iterable of (item_id, date) from a diary log table. Returns the set
-    of ids with at least one log matching every active filter ('all' skips
-    that dimension), or None if no date filter is active at all.
+    rows: iterable of (item_id, date, rating) from a diary log table. Returns
+    the set of ids with at least one log matching every active filter ('all'
+    skips that dimension), or None if no log filter is active at all.
+
+    weekday is 0 (Monday) to 6 (Sunday) and rating a half-star value like
+    "4.5": the stats "By day" and "Ratings" charts count logs the same way.
     """
-    if year_filter == 'all' and month_filter == 'all' and week_filter == 'all':
+    filters = (year_filter, month_filter, week_filter, weekday_filter, rating_filter)
+    if all(f == 'all' for f in filters):
         return None
     try:
         yr = int(year_filter) if year_filter != 'all' else None
         mo = int(month_filter) if month_filter != 'all' else None
         wk = int(week_filter) if week_filter != 'all' else None
+        dow = int(weekday_filter) if weekday_filter != 'all' else None
+        stars = float(rating_filter) if rating_filter != 'all' else None
     except ValueError:
         return set()
 
     ids = set()
-    for item_id, d in rows:
+    for item_id, d, rating in rows:
         if not d:
             continue
         if yr is not None and d.year != yr:
@@ -1931,6 +1937,10 @@ def _diary_filtered_ids(rows, year_filter, month_filter, week_filter):
         if mo is not None and d.month != mo:
             continue
         if wk is not None and _iso_week_bucket(d) != wk:
+            continue
+        if dow is not None and d.weekday() != dow:
+            continue
+        if stars is not None and (not rating or abs(rating - stars) > 0.01):
             continue
         ids.add(item_id)
     return ids
@@ -1947,17 +1957,20 @@ def get_media_library():
     month_filter = request.args.get('month', 'all')
     week_filter = request.args.get('week', 'all')
     language_filter = request.args.get('language', 'all')
+    weekday_filter = request.args.get('weekday', 'all')
+    rating_filter = request.args.get('rating', 'all')
 
-    # "By year/month/week" means "watched then" (from diary logs), not a
-    # release date — the same thing the stats charts count. Resolved once per
-    # media kind as a set of ids so the item loop below stays a membership test.
+    # "By year/month/week/day" means "watched then" (from diary logs), not a
+    # release date, and "rated" means a log's rating — the same things the
+    # stats charts count. Resolved once per media kind as a set of ids so the
+    # item loop below stays a membership test.
     movie_date_ids = _diary_filtered_ids(
-        db.session.query(MovieDiaryLog.movie_id, MovieDiaryLog.date).all(),
-        year_filter, month_filter, week_filter,
+        db.session.query(MovieDiaryLog.movie_id, MovieDiaryLog.date, MovieDiaryLog.rating).all(),
+        year_filter, month_filter, week_filter, weekday_filter, rating_filter,
     )
     show_date_ids = _diary_filtered_ids(
-        db.session.query(TvDiaryLog.tv_show_id, TvDiaryLog.date).all(),
-        year_filter, month_filter, week_filter,
+        db.session.query(TvDiaryLog.tv_show_id, TvDiaryLog.date, TvDiaryLog.rating).all(),
+        year_filter, month_filter, week_filter, weekday_filter, rating_filter,
     )
 
     combined = []

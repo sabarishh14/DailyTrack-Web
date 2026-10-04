@@ -1,6 +1,8 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
 import CustomSelect from '../../components/CustomSelect';
 import TvStatsSections from './TvStatsSections';
+import { CountUp, DayChart, RatingChart, WeekChart } from './StatsCharts';
+import { MONTHS_LONG, peakIndex } from './statsFormat';
 
 // ═══════════════════════════════════════════════════════════════════════
 // STATS VIEW — Letterboxd-Inspired Movie & TV Stats
@@ -237,18 +239,13 @@ function MovieStatsSections({ d, statsYear, openModal, onFilterLibrary }) {
     return Object.values(map).map(m => ({ ...m, tags: Array.from(m.allTags) }));
   }, [d, theatreFilter]);
 
-  const maxWeek = Math.max(...d.by_week, 1);
-  const maxDay = Math.max(...d.by_day, 1);
   const maxMonth = Math.max(...(d.by_month || []), 1);
+  const peakMonth = peakIndex(d.by_month || []);
   const maxYear = d.films_by_year ? Math.max(...d.films_by_year.map(y => y.count), 1) : 1;
   const maxLanguage = d.films_by_language ? Math.max(...d.films_by_language.map(l => l.count), 1) : 1;
-  const dayLabels = ['M', 'T', 'W', 'T', 'F', 'S', 'S'];
   const monthLabels = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
-
-  // Rating distribution for chart
-  const ratingKeys = ['0.5', '1.0', '1.5', '2.0', '2.5', '3.0', '3.5', '4.0', '4.5', '5.0'];
-  const ratingValues = ratingKeys.map(k => d.rating_distribution[k] || d.rating_distribution[String(parseFloat(k))] || 0);
-  const maxRating = Math.max(...ratingValues, 1);
+  // Every chart bar opens the Library on exactly what it counted.
+  const filterTo = onFilterLibrary ? (slice) => onFilterLibrary({ year: statsYear, mediaType: 'movie', ...slice }) : null;
 
   // Highest Rated Selection
   let highestRatedList = d.highest_rated || [];
@@ -269,20 +266,20 @@ function MovieStatsSections({ d, statsYear, openModal, onFilterLibrary }) {
       {/* ─── SUMMARY COUNTERS ─── */}
       <div className="stats-counters">
         <div className="stats-counter-card">
-          <div className="stats-counter-value">{d.films_logged}</div>
+          <div className="stats-counter-value"><CountUp value={d.films_logged} /></div>
           <div className="stats-counter-label">Films Watched</div>
         </div>
         <div className="stats-counter-card">
-          <div className="stats-counter-value">{d.total_likes}</div>
+          <div className="stats-counter-value"><CountUp value={d.total_likes} /></div>
           <div className="stats-counter-label">Likes</div>
         </div>
         <div className="stats-counter-card">
-          <div className="stats-counter-value">{d.total_hours}</div>
+          <div className="stats-counter-value"><CountUp value={d.total_hours} decimals={Number.isInteger(d.total_hours) ? 0 : 1} /></div>
           <div className="stats-counter-label">Hours</div>
         </div>
         {d.theatre_stats && d.theatre_stats.total_visits > 0 && (
           <div className="stats-counter-card">
-            <div className="stats-counter-value">{d.theatre_stats.total_visits}</div>
+            <div className="stats-counter-value"><CountUp value={d.theatre_stats.total_visits} /></div>
             <div className="stats-counter-label">Theatre Visits</div>
           </div>
         )}
@@ -324,6 +321,7 @@ function MovieStatsSections({ d, statsYear, openModal, onFilterLibrary }) {
                   ) : (
                     <div className="stats-no-poster">🎬</div>
                   )}
+                  <span className="stats-poster-hover-name">{m.name}</span>
                 </div>
                 <div className="stats-poster-rating">{renderStars(m.rating)}</div>
               </div>
@@ -409,6 +407,7 @@ function MovieStatsSections({ d, statsYear, openModal, onFilterLibrary }) {
                       {m.visitCount}
                     </div>
                   )}
+                  <span className="stats-poster-hover-name">{m.name}</span>
                 </div>
                 <div className="stats-poster-rating">{renderStars(m.rating)}</div>
               </div>
@@ -425,32 +424,13 @@ function MovieStatsSections({ d, statsYear, openModal, onFilterLibrary }) {
       )}
 
       {/* ─── BY WEEK ─── */}
-      <div className="stats-section">
-        <div className="stats-section-header">
-          <span className="stats-section-title">📈 By Week</span>
-        </div>
-        <div className="stats-week-chart">
-          <div className="stats-week-bars">
-            {d.by_week.map((count, i) => (
-              <div
-                key={i}
-                className="stats-week-bar"
-                style={{ height: count > 0 ? `${Math.max(4, (count / maxWeek) * 100)}%` : '0', cursor: onFilterLibrary ? 'pointer' : 'default' }}
-                data-count={`W${i + 1}: ${count} films`}
-                onClick={() => onFilterLibrary && onFilterLibrary({ year: statsYear, week: i + 1, mediaType: 'movie' })}
-                title={onFilterLibrary ? `See films watched in week ${i + 1}` : undefined}
-              />
-            ))}
-          </div>
-          <div className="stats-week-labels">
-            <span>Jan</span>
-            <span>Apr</span>
-            <span>Jul</span>
-            <span>Oct</span>
-            <span>Dec</span>
-          </div>
-        </div>
-      </div>
+      <WeekChart
+        byWeek={d.by_week}
+        year={statsYear}
+        one="film"
+        many="films"
+        onOpenWeek={filterTo && (week => filterTo({ week }))}
+      />
       {/* ─── BY YEAR ─── */}
       {d.year === 'all' && d.films_by_year && d.films_by_year.length > 0 && (
         <div className="stats-section">
@@ -469,7 +449,7 @@ function MovieStatsSections({ d, statsYear, openModal, onFilterLibrary }) {
                 >
                   <div className="stats-month-count">{item.count > 0 ? item.count : ''}</div>
                   <div
-                    className="stats-month-bar"
+                    className="stats-month-bar stats-grow"
                     style={{ height: item.count > 0 ? `${Math.max(6, (item.count / maxYear) * 100)}%` : '4px' }}
                     data-count={`${item.year}: ${item.count} films`}
                   />
@@ -501,7 +481,7 @@ function MovieStatsSections({ d, statsYear, openModal, onFilterLibrary }) {
                   >
                     <div className="stats-month-count">{item.count > 0 ? item.count : ''}</div>
                     <div
-                      className="stats-month-bar"
+                      className="stats-month-bar stats-grow"
                       style={{ height: item.count > 0 ? `${Math.max(6, (item.count / maxLanguage) * 100)}%` : '4px' }}
                       data-count={`${item.language}: ${item.count} films`}
                     />
@@ -519,21 +499,21 @@ function MovieStatsSections({ d, statsYear, openModal, onFilterLibrary }) {
         <div className="stats-section">
           <div className="stats-section-header">
             <span className="stats-section-title">📊 By Month</span>
+            {peakMonth >= 0 && <span className="stats-section-hint">Busiest: {MONTHS_LONG[peakMonth]}</span>}
           </div>
           <div className="stats-month-chart">
             <div className="stats-month-bars">
               {d.by_month.map((count, i) => (
                 <div
                   key={i}
-                  className="stats-month-bar-wrap"
-                  style={{ cursor: onFilterLibrary ? 'pointer' : 'default' }}
-                  onClick={() => onFilterLibrary && onFilterLibrary({ year: statsYear, month: i + 1, mediaType: 'movie' })}
-                  title={onFilterLibrary ? `See films watched in ${monthLabels[i]}` : undefined}
+                  className={`stats-month-bar-wrap ${filterTo && count > 0 ? 'is-clickable' : ''}`}
+                  onClick={() => filterTo && count > 0 && filterTo({ month: i + 1 })}
+                  title={filterTo && count > 0 ? `See films watched in ${MONTHS_LONG[i]}` : undefined}
                 >
                   <div className="stats-month-count">{count > 0 ? count : ''}</div>
                   <div
-                    className="stats-month-bar"
-                    style={{ height: count > 0 ? `${Math.max(6, (count / maxMonth) * 100)}%` : '4px' }}
+                    className={`stats-month-bar stats-grow ${i === peakMonth ? 'is-peak' : ''}`}
+                    style={{ height: count > 0 ? `${Math.max(6, (count / maxMonth) * 100)}%` : '4px', '--grow-delay': `${i * 30}ms` }}
                     data-count={`${monthLabels[i]}: ${count} films`}
                   />
                   <span className="stats-month-label">{monthLabels[i]}</span>
@@ -548,17 +528,17 @@ function MovieStatsSections({ d, statsYear, openModal, onFilterLibrary }) {
       <div className="stats-section">
         <div className="stats-averages">
           <div className="stats-avg-item">
-            <div className="stats-avg-value">{d.films_logged}</div>
+            <div className="stats-avg-value"><CountUp value={d.films_logged} /></div>
             <div className="stats-avg-label">Films logged</div>
           </div>
           <span className="stats-avg-arrow">→</span>
           <div className="stats-avg-item">
-            <div className="stats-avg-value">{d.avg_per_month}</div>
+            <div className="stats-avg-value"><CountUp value={d.avg_per_month} decimals={1} /></div>
             <div className="stats-avg-label">Average per month</div>
           </div>
           <span className="stats-avg-arrow">→</span>
           <div className="stats-avg-item">
-            <div className="stats-avg-value">{d.avg_per_week}</div>
+            <div className="stats-avg-value"><CountUp value={d.avg_per_week} decimals={1} /></div>
             <div className="stats-avg-label">Average per week</div>
           </div>
         </div>
@@ -603,7 +583,7 @@ function MovieStatsSections({ d, statsYear, openModal, onFilterLibrary }) {
           </div>
           <div className="stats-poster-grid">
             {visibleRewatched.map((m) => (
-              <div key={m.movie_id} className="stats-poster-item" onClick={() => openModal({ id: m.movie_id, tmdb_id: m.tmdb_id, type: 'movie', name: m.name, poster_path: m.poster_path })}>
+              <div key={m.movie_id} className="stats-poster-item" style={{ cursor: 'pointer' }} onClick={() => openModal({ id: m.movie_id, tmdb_id: m.tmdb_id, type: 'movie', name: m.name, poster_path: m.poster_path })}>
                 <div className="stats-poster-img-wrap">
                   {m.poster_path ? (
                     <img src={`${TMDB_IMG_STATS}/w185${m.poster_path}`} alt={m.name} loading="lazy" />
@@ -627,6 +607,7 @@ function MovieStatsSections({ d, statsYear, openModal, onFilterLibrary }) {
                   }}>
                     {m.watch_count}
                   </div>
+                  <span className="stats-poster-hover-name">{m.name}</span>
                 </div>
               </div>
             ))}
@@ -643,43 +624,8 @@ function MovieStatsSections({ d, statsYear, openModal, onFilterLibrary }) {
 
       {/* ─── BOTTOM GRID ─── */}
       <div className="stats-bottom-grid">
-        {/* Day of week */}
-        <div>
-          <div className="stats-section-header">
-            <span className="stats-section-title">📅 By Day</span>
-          </div>
-          <div className="stats-day-chart">
-            {d.by_day.map((count, i) => (
-              <div key={i} className="stats-day-bar-wrap">
-                <div
-                  className={`stats-day-bar ${i >= 5 ? 'weekend' : ''}`}
-                  style={{ height: count > 0 ? `${Math.max(4, (count / maxDay) * 80)}px` : '4px' }}
-                  data-count={`${count} films`}
-                />
-                <span className="stats-day-label">{dayLabels[i]}</span>
-              </div>
-            ))}
-          </div>
-        </div>
-
-        {/* Rating distribution */}
-        <div>
-          <div className="stats-section-header">
-            <span className="stats-section-title">⭐ Ratings</span>
-          </div>
-          <div className="stats-rating-chart">
-            {ratingKeys.map((k, i) => (
-              <div key={k} className="stats-rating-bar-wrap">
-                <div
-                  className="stats-rating-bar"
-                  style={{ height: ratingValues[i] > 0 ? `${Math.max(4, (ratingValues[i] / maxRating) * 80)}px` : '4px' }}
-                  data-count={`${ratingValues[i]} films`}
-                />
-                <span className="stats-rating-label">{k.replace('.0', '').replace('.5', '½')}</span>
-              </div>
-            ))}
-          </div>
-        </div>
+        <DayChart byDay={d.by_day} one="film" many="films" onOpenDay={filterTo && (weekday => filterTo({ weekday }))} />
+        <RatingChart distribution={d.rating_distribution} onOpenRating={filterTo && (rating => filterTo({ rating }))} />
       </div>
     </>
   );
