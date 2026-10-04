@@ -17,7 +17,7 @@ from models import *
 from access import require_api_key, require_admin, require_access, current_access, owner_only
 from tenancy import data_owner
 
-from push import send_low_balance_alert
+from push import send_card_budget_alert, send_low_balance_alert
 from blueprints.media import invalidate_stats_cache, _perform_rss_sync_generator, fetch_tmdb_movie_details, letterboxd_username
 
 money_bp = Blueprint("money", __name__)
@@ -117,6 +117,38 @@ def _balance_changes(before):
         "min_balance": acc.min_balance,
         "below_min": acc.min_balance is not None and (acc.balance or 0) < acc.min_balance,
     } for acc in sorted(accounts, key=lambda a: a.account)]
+
+def card_usage(account_names, today=None):
+    """What each credit card among account_names has been used for this
+    calendar month (IST): spends minus refunds, never below zero. Cards don't
+    keep a balance (see apply_balance), so this is their number, and it starts
+    again from zero every month. Bill payments come out of a savings account,
+    so they don't touch it."""
+    cards = sorted({n for n in account_names if is_cc_account(n)})
+    if not cards:
+        return {}
+    month = (today or datetime.now(pytz.timezone('Asia/Kolkata')).date()).replace(day=1)
+    signed = db.case((db.func.lower(Transaction.type) == "credit", -Transaction.amount), else_=Transaction.amount)
+    used = dict(db.session.query(Transaction.account, db.func.sum(signed))
+                .filter(Transaction.account.in_(cards), Transaction.month == month)
+                .group_by(Transaction.account).all())
+    return {name: max(0.0, round(float(used.get(name) or 0), 2)) for name in cards}
+
+def _card_changes(before):
+    """Per-card used-this-month before/after for the add response, and whether
+    the card ended over its monthly budget."""
+    if not before:
+        return []
+    db.session.flush()
+    after = card_usage(before)
+    budgets = {a.account: a.monthly_budget for a in Account.query.filter(Account.account.in_(list(before))).all()}
+    return [{
+        "account": name,
+        "before": before[name],
+        "after": after.get(name, 0.0),
+        "monthly_budget": budgets.get(name),
+        "over_budget": budgets.get(name) is not None and after.get(name, 0.0) > budgets[name],
+    } for name in sorted(before) if name in budgets]
 
 def _need_full_money():
     """Whole-ledger operations are only for users who can see the whole ledger."""
@@ -247,13 +279,17 @@ def get_accounts():
     access = current_access()
     accounts = [acc for acc in Account.query.all() if access.account_allowed(acc.account)]
     show = access.balances_visible
+    used = card_usage([acc.account for acc in accounts]) if show else {}
     result = [
         {
             "account": acc.account,
             "balance": acc.balance if show else None,
             "real_balance": acc.real_balance if show else None, # <-- ADD THIS LINE
             "balance_tracked": acc.balance_tracked,
-            "min_balance": acc.min_balance if show else None
+            "min_balance": acc.min_balance if show else None,
+            # Credit cards only: spent on the card this month, and the limit for it.
+            "used_this_month": used.get(acc.account),
+            "monthly_budget": acc.monthly_budget if show else None,
         }
         for acc in accounts
     ]
@@ -311,6 +347,17 @@ def update_account():
         # Blank or null clears the floor.
         raw = data['min_balance']
         account.min_balance = None if raw in (None, '') else float(raw)
+    if 'monthly_budget' in data:
+        # Blank or null clears the limit.
+        if not is_cc_account(account.account):
+            return jsonify({"success": False, "message": "Only credit cards have a monthly budget"}), 400
+        try:
+            budget = _optional_amount(data['monthly_budget'])
+        except (TypeError, ValueError):
+            return jsonify({"success": False, "message": "The budget must be a number"}), 400
+        if budget is not None and budget <= 0:
+            return jsonify({"success": False, "message": "The budget must be more than zero"}), 400
+        account.monthly_budget = budget
 
     db.session.commit()
 
@@ -326,6 +373,8 @@ def _account_dict(acc):
         "real_balance": acc.real_balance,
         "balance_tracked": acc.balance_tracked,
         "min_balance": acc.min_balance,
+        "used_this_month": 0.0 if is_cc_account(acc.account) else None,
+        "monthly_budget": acc.monthly_budget,
     }
 
 def _optional_amount(raw):
@@ -378,10 +427,13 @@ def create_account():
     try:
         balance = _optional_amount(data.get("balance")) or 0.0
         min_balance = _optional_amount(data.get("min_balance"))
+        monthly_budget = _optional_amount(data.get("monthly_budget"))
     except (TypeError, ValueError):
         return bad("Amounts must be numbers")
     if min_balance is not None and min_balance < 0:
         return bad("The minimum balance can't be negative")
+    if monthly_budget is not None and monthly_budget <= 0:
+        return bad("The budget must be more than zero")
 
     savings = kind == "savings"
     account = Account(
@@ -390,6 +442,7 @@ def create_account():
         real_balance=None,
         balance_tracked=True,
         min_balance=min_balance if savings else None,
+        monthly_budget=None if savings else monthly_budget,
     )
     db.session.add(account)
     db.session.commit()
@@ -627,8 +680,9 @@ def add_transaction():
             except Exception as e:
                 print(f"Failed background RSS sync: {e}")
 
-        balances_before = (_balance_snapshot({item['account'] for item in transactions_data})
-                           if access.balances_visible else {})
+        touched_accounts = {item['account'] for item in transactions_data}
+        balances_before = _balance_snapshot(touched_accounts) if access.balances_visible else {}
+        cards_before = card_usage(touched_accounts) if access.balances_visible else {}
         tx_ids = new_transaction_ids(len(transactions_data))
 
         for item in transactions_data:
@@ -736,9 +790,11 @@ def add_transaction():
             added_count += 1
             
         balance_changes = _balance_changes(balances_before)
+        card_changes = _card_changes(cards_before)
         db.session.commit()
         invalidate_stats_cache()
         send_low_balance_alert(balance_changes, data_owner())
+        send_card_budget_alert(card_changes, data_owner())
         
         msg = f"Successfully added {added_count} transactions & updated balances!"
         if 'movie_link_successes' in locals() and movie_link_successes:
@@ -746,7 +802,8 @@ def add_transaction():
         if 'movie_link_errors' in locals() and movie_link_errors:
             msg += f"\n\n⚠️ Warning: {', '.join(movie_link_errors)}"
             
-        return jsonify({"success": True, "message": msg, "balances": balance_changes})
+        # Cards go in their own list: older apps read every "balances" entry as money left.
+        return jsonify({"success": True, "message": msg, "balances": balance_changes, "cards": card_changes})
 
     except Exception as e:
         print(f"❌ Error adding transaction(s): {str(e)}")

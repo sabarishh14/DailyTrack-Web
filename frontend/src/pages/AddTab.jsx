@@ -14,7 +14,7 @@ import CustomSelect from '../components/CustomSelect';
 import AutocompleteInput from '../components/AutocompleteInput';
 import TmdbMovieSearchInput from '../components/TmdbMovieSearchInput';
 import TagPillInput from '../components/TagPillInput';
-import { BalancesPanel, projectBalances } from '../components/BalanceImpact';
+import { BalancesPanel, projectBalances, projectCards } from '../components/BalanceImpact';
 
 function AddTab({ accounts, categories, onAdd, dataVersion }) {
   const today = new Date().toISOString().split('T')[0];
@@ -65,10 +65,12 @@ function AddTab({ accounts, categories, onAdd, dataVersion }) {
   const [submitMessage, setSubmitMessage] = useState(null);
   // What the last save moved, per account; shown until the next save.
   const [savedBalances, setSavedBalances] = useState(null);
+  const [savedCards, setSavedCards] = useState(null);
 
   // Just after a save the saved rows linger for a moment while balances have
   // already refreshed, so they mustn't be counted a second time.
   const projections = useMemo(() => success ? {} : projectBalances(rows, accounts), [rows, accounts, success]);
+  const cardProjections = useMemo(() => success ? {} : projectCards(rows, accounts), [rows, accounts, success]);
 
   // MAGICAL AUTO-SAVE: Saves to local storage every time you type a letter
   useEffect(() => {
@@ -229,6 +231,7 @@ function AddTab({ accounts, categories, onAdd, dataVersion }) {
     setLoading(true);
     setSubmitMessage(null);
     setSavedBalances(null);
+    setSavedCards(null);
     try {
       const payload = evaluatedRows.map(r => {
         const catName = r.heading.trim();
@@ -266,6 +269,7 @@ movie_tags: r.movie_tags,
         setSuccess(true);
         setSubmitMessage({ type: 'success', text: data.message || "Successfully saved!" });
         setSavedBalances(data.balances || null);
+        setSavedCards(data.cards || null);
         // Wipe local storage draft only on successful save
         localStorage.removeItem('dt_draft_txs');
         setTimeout(() => {
@@ -326,7 +330,13 @@ movie_tags: r.movie_tags,
         </div>
       )}
 
-      <BalancesPanel accounts={accounts} projected={projections} saved={savedBalances} />
+      <BalancesPanel
+        accounts={accounts}
+        projected={projections}
+        saved={savedBalances}
+        projectedCards={cardProjections}
+        savedCards={savedCards}
+      />
 
       <div className="add-table-wrap" style={{ background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 'var(--radius-lg)', padding: '1.5rem', overflowX: 'auto' }}>
         <div className="add-table-inner">

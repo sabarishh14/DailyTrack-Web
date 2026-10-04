@@ -10,7 +10,7 @@ import { getToken, formatDate, fmt, fmtPct, getBankEmoji, accountColor, isCcAcco
 import CustomSelect from '../components/CustomSelect';
 import ReconciliationModal from '../components/ReconciliationModal';
 import FirstAccountPrompt from '../components/FirstAccountPrompt';
-import { MinBalanceChip, balanceLevel } from '../components/BalanceImpact';
+import { CardBudgetChip, MinBalanceChip, balanceLevel, cardLevel } from '../components/BalanceImpact';
 import { useAccess } from '../access/AccessContext';
 import RoutinesHomeCard from './routines-components/RoutinesHomeCard';
 import { apiGet, apiPost, useApi, monthKey } from '../api/money';
@@ -225,32 +225,41 @@ const [showInvestments, setShowInvestments] = useState(false);
         </div>
         <div className="accounts-grid">
           {accounts
-            // Cards' balances aren't tracked, so there's nothing to show for them here.
-            .filter(a => a.balance_tracked && !isCcAccount(a.account))
+            // Cards keep no balance; they show what they've been used for this month instead.
+            .filter(a => a.balance_tracked && (!isCcAccount(a.account) || a.used_this_month != null))
             .sort((a, b) => {
-              // The familiar ones in their usual order, then any added since, alphabetically.
+              // The familiar ones in their usual order, then cards, then any added since, alphabetically.
               const orderA = Object.keys(BANKS).indexOf(a.account);
               const orderB = Object.keys(BANKS).indexOf(b.account);
-              const indexA = orderA === -1 ? 999 : orderA;
-              const indexB = orderB === -1 ? 999 : orderB;
+              const indexA = orderA === -1 ? (isCcAccount(a.account) ? 500 : 999) : orderA;
+              const indexB = orderB === -1 ? (isCcAccount(b.account) ? 500 : 999) : orderB;
               return indexA - indexB || a.account.localeCompare(b.account);
             })
-            .map(a => (
-              <div
-                className={`account-card ${showBalances && a.min_balance != null ? `floor-${balanceLevel(a.balance || 0, a.min_balance)}` : ''}`}
-                key={a.account}
-                style={{ "--accent": accountColor(a.account) }}
-              >
-                <div className="acc-top">
-                  <span className="acc-emoji">{getBankEmoji(a.account)}</span>
-                  <span className="acc-name">{a.account}</span>
+            .map(a => {
+              const card = isCcAccount(a.account);
+              const used = a.used_this_month || 0;
+              const limit = card ? a.monthly_budget : a.min_balance;
+              const level = card ? cardLevel(used, a.monthly_budget ?? null) : balanceLevel(a.balance || 0, a.min_balance);
+              return (
+                <div
+                  className={`account-card ${showBalances && limit != null ? `floor-${level}` : ''}`}
+                  key={a.account}
+                  style={{ "--accent": accountColor(a.account) }}
+                >
+                  <div className="acc-top">
+                    <span className="acc-emoji">{getBankEmoji(a.account)}</span>
+                    <span className="acc-name">{a.account}</span>
+                  </div>
+                  <div className="acc-balance">
+                    {!showBalances ? '₹ ••••••' : card ? (used > 0 ? `−${fmt(used)}` : fmt(0)) : fmt(a.balance)}
+                  </div>
+                  {showBalances && card && <div className="acc-caption">Used this month</div>}
+                  {showBalances && (card
+                    ? <CardBudgetChip account={a.account} budget={a.monthly_budget} used={used} editable={fullMoney} onSaved={onRefresh} />
+                    : <MinBalanceChip account={a.account} min={a.min_balance} editable={fullMoney} onSaved={onRefresh} />)}
                 </div>
-                <div className="acc-balance">{showBalances ? fmt(a.balance) : '₹ ••••••'}</div>
-                {showBalances && !a.account.toUpperCase().startsWith('CC') && (
-                  <MinBalanceChip account={a.account} min={a.min_balance} editable={fullMoney} onSaved={onRefresh} />
-                )}
-              </div>
-            ))}
+              );
+            })}
         </div>
       </section>
       )}

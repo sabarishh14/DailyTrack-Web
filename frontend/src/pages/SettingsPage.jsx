@@ -4,7 +4,7 @@ import { useAccess } from '../access/AccessContext';
 import { apiGet, apiPost, useMoneyMeta, EMPTY_META } from '../api/money';
 import { API } from '../constants';
 import { accountColor, fmt, getBankEmoji, getToken, isCcAccount } from '../utils';
-import { MinBalanceChip } from '../components/BalanceImpact';
+import { CardBudgetChip, MinBalanceChip } from '../components/BalanceImpact';
 import ReconciliationModal from '../components/ReconciliationModal';
 import BudgetManagerModal from '../components/BudgetManagerModal';
 import CategoryExclusionModal from '../components/CategoryExclusionModal';
@@ -262,8 +262,14 @@ function AccountsSection({ accounts = [], onRefresh, onToast }) {
             <span className="st-acc-badge">💳</span>
             <div className="st-acc-text">
               <b>{a.account}</b>
-              <span className="st-muted">Credit card</span>
+              <CardBudgetChip account={a.account} budget={a.monthly_budget} used={a.used_this_month || 0} editable onSaved={onRefresh} />
             </div>
+            {a.used_this_month != null && (
+              <span className="st-card-used" title="Used this month; starts again on the 1st">
+                {a.used_this_month > 0 ? `−${fmt(a.used_this_month)}` : fmt(0)}
+                <small>this month</small>
+              </span>
+            )}
           </div>
         ))}
       </div>

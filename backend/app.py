@@ -94,6 +94,7 @@ with app.app_context():
     from sqlalchemy import text
     try:
         db.session.execute(text("ALTER TABLE accounts ADD COLUMN IF NOT EXISTS min_balance NUMERIC(14,2)"))
+        db.session.execute(text("ALTER TABLE accounts ADD COLUMN IF NOT EXISTS monthly_budget NUMERIC(14,2)"))
         db.session.commit()
         # New tables only (balance_adjustments, device_tokens, routines, routine_checkins);
         # existing ones are left alone.

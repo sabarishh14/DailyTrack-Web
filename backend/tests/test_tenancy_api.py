@@ -176,7 +176,7 @@ class TenancyApiTest(unittest.TestCase):
     def test_low_balance_alerts_reach_only_your_phones(self):
         sent = []
         original_send, original_threading = push._send, push.threading
-        push._send = lambda app, tokens, title, body: sent.append(sorted(tokens))
+        push._send = lambda app, tokens, kind, title, body: sent.append(sorted(tokens))
         push.threading = types.SimpleNamespace(
             Thread=lambda target, args, daemon: types.SimpleNamespace(start=lambda: target(*args)))
         try:

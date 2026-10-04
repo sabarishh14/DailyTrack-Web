@@ -26,6 +26,8 @@ class Account(Owned, db.Model):
     balance_tracked = db.Column(db.Boolean, default=True)
     # Warn when a transaction would take the balance below this. None = no floor.
     min_balance = db.Column(Money, nullable=True)
+    # A credit card's spending limit for each calendar month. None = no limit.
+    monthly_budget = db.Column(Money, nullable=True)
 class Transaction(Owned, db.Model):
     __tablename__ = "transactions"
     # Identical spends on one day are fine (two ₹90 snacks), so there's no
