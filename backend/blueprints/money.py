@@ -684,6 +684,8 @@ def add_transaction():
         balances_before = _balance_snapshot(touched_accounts) if access.balances_visible else {}
         cards_before = card_usage(touched_accounts) if access.balances_visible else {}
         tx_ids = new_transaction_ids(len(transactions_data))
+        movie_link_errors = []
+        movie_link_successes = []
 
         for item in transactions_data:
             date_obj = datetime.strptime(item['date'], '%Y-%m-%d')
@@ -718,10 +720,8 @@ def add_transaction():
             
             apply_balance(acc_name, tx_type, amount)
 
-            # --- NEW: Link Movie Tags ---
-            movie_link_errors = []
-            movie_link_successes = []
-            if can_link_movies and item.get('heading', '').strip().lower() == 'cinema' and item.get('movie_tags'):
+            # --- Link the film: a picked movie is enough, tags are optional ---
+            if can_link_movies and item.get('heading', '').strip().lower() == 'cinema' and (item.get('movie_data') or item.get('movie_tags')):
                 movie_data = item.get('movie_data')
                 
                 if movie_data and movie_data.get('tmdb_id'):
@@ -743,9 +743,13 @@ def add_transaction():
                             release_date=details["release_date"],
                             director=details["director"],
                             top_cast=details["top_cast"],
+                            language=details["language"],
                         )
                         db.session.add(movie)
                         db.session.flush()
+                    elif not movie.language:
+                        # Added before this path saved it: fill it in now.
+                        movie.language = fetch_tmdb_movie_details(tmdb_id)["language"]
                         
                     # Ensure we have a diary log
                     log_date = date_obj.date()
@@ -797,9 +801,9 @@ def add_transaction():
         send_card_budget_alert(card_changes, data_owner())
         
         msg = f"Successfully added {added_count} transactions & updated balances!"
-        if 'movie_link_successes' in locals() and movie_link_successes:
+        if movie_link_successes:
             msg += f"\n\n🎬 Successfully added tags for: {', '.join(movie_link_successes)}"
-        if 'movie_link_errors' in locals() and movie_link_errors:
+        if movie_link_errors:
             msg += f"\n\n⚠️ Warning: {', '.join(movie_link_errors)}"
             
         # Cards go in their own list: older apps read every "balances" entry as money left.

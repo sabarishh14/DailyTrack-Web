@@ -1785,7 +1785,7 @@ def _perform_rss_sync_generator(username, fast_mode=False):
             # Fill in details older imports never stored, so stats like Newest
             # Release have a real date to work with. Only runs while something
             # is missing, and at most once per film per sync.
-            if movie.tmdb_id and movie.id not in detail_checked and (movie.runtime is None or not movie.release_date):
+            if movie.tmdb_id and movie.id not in detail_checked and (movie.runtime is None or not movie.release_date or not movie.language):
                 detail_checked.add(movie.id)
                 details = fetch_tmdb_movie_details(movie.tmdb_id, session=tmdb_session, timeout=3 if fast_mode else 10)
                 if details["fetched"]:

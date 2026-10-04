@@ -242,10 +242,12 @@ setAccounts([]);
 
   // Re-check permissions: picks up role changes live and logs out a removed user.
   const refreshAccess = useCallback(async () => {
-    if (!getToken()) return;
+    const sentWith = getToken();
+    if (!sentWith) return;
     try {
-      const r = await fetch(`${API}/auth/me`, { headers: { 'Authorization': `Bearer ${getToken()}` } });
-      if (r.status === 401) return logout(await revokedNotice(r));
+      const r = await fetch(`${API}/auth/me`, { headers: { 'Authorization': `Bearer ${sentWith}` } });
+      // Only the session this request belonged to ends (not one signed in since).
+      if (r.status === 401) return getToken() === sentWith && logout(await revokedNotice(r));
       // No longer shared with you: back to your own data.
       if (r.status === 403 && getViewAs()) return switchView(null);
       const res = await r.json();
@@ -353,9 +355,10 @@ setAccounts([]);
       // Helper function that explicitly throws an error if the server is throwing 500/503 during wake-up
       const fetchWithCheck = async (url, name) => {
         if (showLoading) addLog(`Fetching ${name}...`);
-        const r = await fetch(url, { headers: { 'Authorization': `Bearer ${getToken()}` } });
+        const sentWith = getToken();
+        const r = await fetch(url, { headers: { 'Authorization': `Bearer ${sentWith}` } });
         if (r.status === 401) {
-          logout(await revokedNotice(r));
+          if (getToken() === sentWith) logout(await revokedNotice(r));
           throw new Error("UNAUTHORIZED");
         }
         if (r.status === 403 && getViewAs()) {
@@ -438,6 +441,9 @@ when(invest, `${API}/assets/list`, 'Market Symbols', {}),
   }, [logout, switchView]);
 
   useEffect(() => { if (isLoggedIn) fetchAll(true); }, [fetchAll, isLoggedIn]);
+
+  // Opening the menu checks for anything newly shared with you, so it's there to pick.
+  useEffect(() => { if (isMenuOpen) refreshAccess(); }, [isMenuOpen, refreshAccess]);
 
   // Switching whose data is on screen: start over on Home with theirs (or yours).
   const viewAsLoaded = useRef(viewAs);
