@@ -53,7 +53,9 @@ export const SKIP_REASONS = ['🤒 Unwell', '✈️ Travelling', '😴 Rest day'
  */
 export function mix(stats) {
   if (!stats) return null;
-  return { done: stats.done, skipped: stats.skipped, missed: stats.missed, open: stats.unanswered };
+  // Every blank, even one too early to count against the score: the day isn't
+  // complete, so it never looks it.
+  return { done: stats.done, skipped: stats.skipped, missed: stats.missed, open: stats.blank ?? stats.unanswered };
 }
 
 export const mixTotal = (m) => (m ? m.done + m.skipped + m.missed + m.open : 0);

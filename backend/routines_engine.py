@@ -112,6 +112,9 @@ class DayStats:
     missed: int = 0
     skipped: int = 0
     unanswered: int = 0
+    # Every required one with no answer, counted or not (a day from before the
+    # routine was added): what the charts draw as not filled in.
+    blank: int = 0
 
     @property
     def fraction(self):
@@ -373,6 +376,7 @@ class RoutineEngine:
             missed=sum(1 for i in items if i.required and i.status == MISSED),
             skipped=sum(1 for i in items if i.required and i.status == SKIPPED),
             unanswered=sum(1 for i in items if i.required and i.status is None and self._counts(i)),
+            blank=sum(1 for i in items if i.required and i.status is None),
         )
 
     @staticmethod

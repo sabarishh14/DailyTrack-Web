@@ -441,7 +441,7 @@ def _stats_json(s):
     if s is None:
         return None
     return {"date": s.date.isoformat(), "done": s.done, "total": s.total,
-            "missed": s.missed, "skipped": s.skipped, "unanswered": s.unanswered}
+            "missed": s.missed, "skipped": s.skipped, "unanswered": s.unanswered, "blank": s.blank}
 
 
 def _score_json(s):

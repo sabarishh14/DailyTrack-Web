@@ -70,7 +70,9 @@ export function DayModal({ date, today, unfilled = [], routinesById, onClose, on
               <b>{stats.done}</b> of {stats.total} done
               {stats.missed > 0 && <> · {stats.missed} missed</>}
               {stats.skipped > 0 && <> · {stats.skipped} skipped</>}
-              {day < today && stats.unanswered > 0 && <> · {stats.unanswered} left blank, counted as missed</>}
+              {day < today && (stats.blank ?? stats.unanswered) > 0 && (
+                <> · {stats.blank ?? stats.unanswered} not filled in{stats.unanswered > 0 ? ', counted as missed' : ''}</>
+              )}
             </div>
           )}
           {shown.items.length === 0

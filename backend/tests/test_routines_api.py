@@ -325,6 +325,22 @@ class RoutinesApiTest(unittest.TestCase):
         self.checkin(read["id"], (today - timedelta(days=1)).isoformat(), "missed")
         self.assertEqual(self.summary()["unfilled_days"][0], (today - timedelta(days=3)).isoformat())
 
+    def test_a_cleared_day_from_before_a_routine_was_added_shows_blank(self):
+        today = _ist_today()
+        day = (today - timedelta(days=2)).isoformat()
+        self.create(name="Walk", start_date=(today - timedelta(days=5)).isoformat())
+        added_later = self.create(name="Read", start_date=(today - timedelta(days=5)).isoformat())
+        walk = self.listing()["routines"][0]
+        self.checkin(walk["id"], day, "done")
+        self.checkin(added_later["id"], day, "done")
+        self.checkin(added_later["id"], day, None)  # cleared
+
+        resp = self.call("GET", f"/api/routines/day?date={day}")
+        stats = resp.get_json()["stats"]
+        # Not a miss (it was added after), but not a complete day either.
+        self.assertEqual((stats["done"], stats["missed"], stats["unanswered"], stats["blank"]), (1, 0, 0, 1))
+        self.assertNotIn(day, self.summary()["unfilled_days"])
+
     def test_the_summary_is_personal(self):
         self.create(VIEWER)
         self.assertEqual(self.summary(OTHER)["routines"], [])
