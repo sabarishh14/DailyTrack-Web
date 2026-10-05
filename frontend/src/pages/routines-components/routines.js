@@ -46,16 +46,14 @@ export const CHOICES = [
 
 export const SKIP_REASONS = ['🤒 Unwell', '✈️ Travelling', '😴 Rest day', '⏳ No time', '🌧️ Weather', '🎉 Occasion'];
 
-/** A day's mix for drawing. Blanks are misses once the day is over, and still open today. */
-export function mix(stats, today) {
+/**
+ * A day's mix for drawing. Blanks stay blank — an empty stretch of the ring — on
+ * any day, so a day never filled in looks it, not like a day of misses. (The
+ * score still counts a past blank as missed until it's answered.)
+ */
+export function mix(stats) {
   if (!stats) return null;
-  const over = stats.date < today;
-  return {
-    done: stats.done,
-    skipped: stats.skipped,
-    missed: stats.missed + (over ? stats.unanswered : 0),
-    open: over ? 0 : stats.unanswered,
-  };
+  return { done: stats.done, skipped: stats.skipped, missed: stats.missed, open: stats.unanswered };
 }
 
 export const mixTotal = (m) => (m ? m.done + m.skipped + m.missed + m.open : 0);
@@ -92,6 +90,10 @@ export const longDate = (iso, today) => {
 };
 
 export const weekday = (iso) => WEEKDAYS[parseDay(iso).getDay()];
+
+/** "Yesterday", or "Sat 27". */
+export const shortDate = (iso, today) =>
+  (iso === addDays(today, -1) ? 'Yesterday' : `${WEEKDAYS[parseDay(iso).getDay()].slice(0, 3)} ${parseDay(iso).getDate()}`);
 
 export const monthOf = (iso) => iso.slice(0, 7);
 

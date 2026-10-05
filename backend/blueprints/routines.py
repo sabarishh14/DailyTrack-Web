@@ -28,6 +28,7 @@ IST = pytz.timezone("Asia/Kolkata")
 KINDS = ("build", "avoid")
 SCHEDULES = ("daily", "days", "weekly", "monthly", "interval")
 UNITS = ("day", "week", "month")
+FILL_IN_WINDOW = 30  # days back the page asks to fill in: as far as the score looks
 STATUSES = ("done", "missed", "skipped")
 TARGET_LIMITS = {"weekly": 7, "monthly": 31}
 MAX_NAME, MAX_EMOJI, MAX_NOTE = 60, 16, 120
@@ -515,6 +516,10 @@ def build_summary(owner, today, month):
         "month": month.strftime("%Y-%m"),
         "history": [_stats_json(engine.day_stats(d)) for d in _month_days(month, today)],
         "first_day": _iso(min((r.start_date for r in active.values()), default=None)),
+        # Days the 30-day score counts as missed only because nothing was
+        # answered, newest first: the page asks for these to be filled in.
+        "unfilled_days": [d.isoformat() for d in (today - timedelta(days=n) for n in range(1, FILL_IN_WINDOW + 1))
+                          if engine.day_stats(d).unanswered > 0],
         "routines": routines,
     }
 

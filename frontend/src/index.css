@@ -8056,6 +8056,31 @@ input[type="date"]::-webkit-calendar-picker-indicator {
   font-size: 1.2rem;
 }
 
+/* Days never answered: first thing on the page until they're filled in. */
+.rt-fill-in {
+  display: flex;
+  align-items: center;
+  gap: 0.8rem;
+  width: 100%;
+  padding: 0.85rem 1.1rem;
+  background: rgba(var(--accent-rgb), 0.12);
+  border: 1px solid rgba(var(--accent-rgb), 0.35);
+  border-radius: var(--radius-lg);
+  color: var(--text);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition: background 0.15s, transform 0.15s;
+}
+.rt-fill-in:hover { background: rgba(var(--accent-rgb), 0.18); }
+.rt-fill-in:active { transform: scale(0.99); }
+.rt-fill-in-icon { font-size: 1.3rem; }
+.rt-fill-in-text { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 0.1rem; }
+.rt-fill-in-text b { font-size: 0.92rem; }
+.rt-fill-in-text span { font-size: 0.78rem; color: var(--text3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.rt-fill-in-cta { font-weight: 700; font-size: 0.85rem; color: var(--accent-text); white-space: nowrap; }
+.rt-fill-next { width: 100%; margin-top: 0.85rem; }
+
 .rt-today-text {
   flex: 1;
   min-width: 0;

@@ -308,6 +308,23 @@ class RoutinesApiTest(unittest.TestCase):
         self.assertEqual(routines[read["id"]]["streak"], {"current": 1, "best": 1, "unit": "day"})
         self.assertEqual(routines[gym["id"]]["schedule_text"], "3× a week")
 
+    def test_the_summary_lists_days_left_to_fill_in(self):
+        today = _ist_today()
+        start = today - timedelta(days=4)
+        read = self.create(name="Read", start_date=start.isoformat())
+        # Added back then, so its blank days count (days before adding never do).
+        with self.app.app_context():
+            row = db.session.get(models.Routine, read["id"])
+            row.created_at = datetime(start.year, start.month, start.day, 6, 0)
+            db.session.commit()
+        self.checkin(read["id"], (today - timedelta(days=2)).isoformat(), "done")
+
+        unfilled = self.summary()["unfilled_days"]
+        self.assertEqual(unfilled, [(today - timedelta(days=n)).isoformat() for n in (1, 3, 4)])
+
+        self.checkin(read["id"], (today - timedelta(days=1)).isoformat(), "missed")
+        self.assertEqual(self.summary()["unfilled_days"][0], (today - timedelta(days=3)).isoformat())
+
     def test_the_summary_is_personal(self):
         self.create(VIEWER)
         self.assertEqual(self.summary(OTHER)["routines"], [])

@@ -4,7 +4,7 @@ import { DayModal, RoutineModal } from './routines-components/RoutineModals';
 import RoutineEditor from './routines-components/RoutineEditor';
 import { useAccess } from '../access/AccessContext';
 import {
-  addDays, dayMonth, fetchSummary, mix, percent, saveAnswer, scoreMix, trendPoints, verdict, weekday,
+  addDays, dayMonth, fetchSummary, mix, percent, saveAnswer, scoreMix, shortDate, trendPoints, verdict, weekday,
 } from './routines-components/routines';
 
 // Per-viewer conveniences only; the page works the same without them.
@@ -155,11 +155,26 @@ function RoutinesTab() {
       : perfect.current === 1 ? `🔥 1 perfect day · best ${perfect.best}`
         : `Best streak: ${perfect.best} ${perfect.best === 1 ? 'day' : 'days'}`;
   const trend = trendPoints(summary.consistency, summary.previous_consistency);
+  // Days never answered, newest first; they count as missed until filled in.
+  const unfilled = viewing ? [] : (summary.unfilled_days || []);
 
   return (
     <>
       <div className="rt-grid">
         <div className="rt-col">
+          {unfilled.length > 0 && (
+            <button className="rt-fill-in" onClick={() => setOpenDay(unfilled[0])}>
+              <span className="rt-fill-in-icon">🕰️</span>
+              <span className="rt-fill-in-text">
+                <b>{unfilled.length === 1 ? `${shortDate(unfilled[0], today)} isn't filled in` : `${unfilled.length} days to fill in`}</b>
+                <span>
+                  {unfilled.length === 1 ? 'Counts as missed until you do'
+                    : unfilled.slice(0, 3).map(d => shortDate(d, today)).join(', ') + (unfilled.length > 3 ? ` +${unfilled.length - 3}` : '')}
+                </span>
+              </span>
+              <span className="rt-fill-in-cta">Fill in</span>
+            </button>
+          )}
           {/* Consistency leads; today sits right under it. */}
           <section className="rt-card rt-hero">
             <div className="rt-hero-top">
@@ -184,7 +199,7 @@ function RoutinesTab() {
               </div>
             </div>
             <div className="rt-today">
-              {hasDue ? <MixRing mix={mix(stats, today)} size={34} stroke={4} /> : <span className="rt-today-icon">☀️</span>}
+              {hasDue ? <MixRing mix={mix(stats)} size={34} stroke={4} /> : <span className="rt-today-icon">☀️</span>}
               <span className="rt-today-text">
                 <b>Today · {weekday(today)}, {dayMonth(today)}</b>
                 <span>{todayLine}</span>
@@ -306,6 +321,7 @@ function RoutinesTab() {
         <DayModal
           date={openDay}
           today={today}
+          unfilled={unfilled}
           routinesById={routinesById}
           onClose={() => setOpenDay(null)}
           onChanged={load}

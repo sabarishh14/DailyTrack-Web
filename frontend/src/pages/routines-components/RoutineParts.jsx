@@ -68,7 +68,7 @@ export function WeekBars({ week, today, onDay }) {
   return (
     <div className="rt-week">
       {week.map((stats, i) => {
-        const m = mix(stats, today);
+        const m = mix(stats);
         const all = mixTotal(m);
         const isToday = stats?.date === today;
         return (
@@ -110,7 +110,7 @@ export function HistoryCalendar({ month, history, today, firstDay, onMonth, onDa
         {monthGrid(month).map((iso, i) => {
           if (!iso) return <span key={i} />;
           const stats = byDate[iso];
-          const m = mix(stats, today);
+          const m = mix(stats);
           const perfect = m && m.done > 0 && m.missed === 0 && m.open === 0;
           const future = iso > today;
           return (

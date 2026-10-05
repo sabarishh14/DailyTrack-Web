@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { AnswerButtons, ItemRow, Modal } from './RoutineParts';
 import {
   addDays, dayMonth, fetchDay, fetchDetail, longDate, monthGrid, monthLabel, monthOf,
-  parseDay, percent, saveAnswer, shiftMonth, streakLength,
+  parseDay, percent, saveAnswer, shiftMonth, shortDate, streakLength,
 } from './routines';
 
 /** Loads with `fetcher(key)`, dropping answers to requests that were overtaken. */
@@ -26,7 +26,7 @@ function useLoader(fetcher, key) {
 }
 
 /** One day's list, to look back at or fill in. */
-export function DayModal({ date, today, routinesById, onClose, onChanged, onOpenRoutine }) {
+export function DayModal({ date, today, unfilled = [], routinesById, onClose, onChanged, onOpenRoutine }) {
   const [day, setDay] = useState(date);
   const { data, setData, error, setError, load } = useLoader(fetchDay, day);
   const [saving, setSaving] = useState(false);
@@ -46,6 +46,9 @@ export function DayModal({ date, today, routinesById, onClose, onChanged, onOpen
   };
 
   const stats = shown?.stats;
+  // Once this day has nothing left open, on to the next blank one.
+  const next = unfilled.find(d => d !== day);
+  const filled = shown && !shown.items.some(i => i.required && !i.status);
   return (
     <Modal
       title={longDate(day, today)}
@@ -86,6 +89,11 @@ export function DayModal({ date, today, routinesById, onClose, onChanged, onOpen
                 ))}
               </div>
             )}
+          {next && filled && (
+            <button className="action-btn rt-fill-next" onClick={() => setDay(next)}>
+              Next: {shortDate(next, today)} →
+            </button>
+          )}
         </>
       )}
     </Modal>
