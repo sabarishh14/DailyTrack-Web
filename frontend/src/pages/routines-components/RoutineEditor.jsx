@@ -14,8 +14,6 @@ const TEMPLATES = [
   { emoji: '🧘', name: 'Meditate 10 minutes' },
   { emoji: '🚶', name: 'Walk 8,000 steps' },
   { emoji: '📵', name: 'No phone in bed', kind: 'avoid' },
-  { emoji: '🛏️', name: 'Change bedsheets', schedule: 'interval', every: 1, unit: 'week' },
-  { emoji: '🌬️', name: 'Clean AC filter', schedule: 'interval', every: 3, unit: 'month' },
 ];
 
 const EMOJIS = [
@@ -27,7 +25,7 @@ const EMOJIS = [
 
 const SCHEDULES = [
   ['daily', 'Every day'], ['days', 'Some days'], ['weekly', 'Times a week'],
-  ['monthly', 'Times a month'], ['interval', 'Every few…'],
+  ['monthly', 'Times a month'], ['interval', 'Chore'],
 ];
 const UNITS = [['day', 'days'], ['week', 'weeks'], ['month', 'months']];
 const CHALLENGE_LENGTHS = [7, 14, 21, 30, 60, 90];
@@ -234,7 +232,7 @@ export default function RoutineEditor({ routine, today, onClose, onDone, onChang
   const end = challengeEnd(form);
 
   return (
-    <Modal title={editing ? 'Edit routine' : 'New routine'} subtitle={editing ? routine.name : 'A habit, a challenge or a chore'} onClose={close}>
+    <Modal title={editing ? 'Edit routine' : 'New routine'} subtitle={editing ? routine.name : 'A habit to build, or one to quit'} onClose={close}>
       <div className="rt-editor">
         {!editing && (
           <Field label="Start from a template">
@@ -286,7 +284,8 @@ export default function RoutineEditor({ routine, today, onClose, onDone, onChang
 
         <Field label="How often">
           <div className="rt-pills">
-            {SCHEDULES.map(([schedule, label]) => (
+            {/* Chores are on hold for new routines; one that's already a chore stays editable. */}
+            {SCHEDULES.filter(([schedule]) => schedule !== 'interval' || form.schedule === 'interval').map(([schedule, label]) => (
               <Pill key={schedule} selected={form.schedule === schedule} onClick={() => update({ schedule })}>{label}</Pill>
             ))}
           </div>

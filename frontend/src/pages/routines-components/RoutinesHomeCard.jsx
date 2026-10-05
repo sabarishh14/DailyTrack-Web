@@ -26,7 +26,7 @@ export default function RoutinesHomeCard({ onOpen, dataVersion }) {
   const streak = summary?.perfect_days.current || 0;
 
   let today = 'Loading…';
-  if (summary && active.length === 0) today = 'Add a habit, a challenge or a chore';
+  if (summary && active.length === 0) today = 'Add a habit or a challenge';
   else if (summary && stats.total === 0 && open.length === 0) today = 'Nothing due today';
   else if (summary) {
     today = open.length > 0 ? `${stats.done} of ${stats.total} done today · ${open.length} left`

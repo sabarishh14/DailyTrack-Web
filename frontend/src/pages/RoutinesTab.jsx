@@ -121,7 +121,7 @@ function RoutinesTab() {
         <div className="rt-empty-icon">🌱</div>
         <div className="rt-empty-title">No routines yet</div>
         <div className="rt-muted">
-          Habits to build, things to quit, challenges with a finish line and chores that come round again.
+          Habits to build, things to quit and challenges with a finish line.
           Check in here or on the phone.
         </div>
         {!viewing && <button className="action-btn" style={{ marginTop: '0.75rem' }} onClick={() => setEditing({ routine: null })}>＋ Add a routine</button>}
