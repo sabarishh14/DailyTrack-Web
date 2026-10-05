@@ -224,6 +224,11 @@ def current_access():
     return getattr(g, "access", None)
 
 
+# POSTs that only read: their filters are too big for a query string. Allowed
+# while viewing someone's shared data, which otherwise takes no writes.
+READ_ONLY_POSTS = frozenset({"/api/money/analyze", "/api/transactions/query"})
+
+
 # ---- decorators ----
 def _authenticate():
     """Resolve the caller into g.access. Returns an error response or None."""
@@ -254,7 +259,7 @@ def _authenticate():
         share = db.session.get(Share, {"owner_email": view_as, "viewer_email": access.email})
         if share is None:
             return jsonify({"success": False, "code": "NOT_SHARED", "message": "That isn't shared with you"}), 403
-        if request.method not in ("GET", "HEAD"):
+        if request.method not in ("GET", "HEAD") and request.path not in READ_ONLY_POSTS:
             return _forbidden("This is shared with you to view only")
         access = Access.viewing(access.email, view_as, share.modules)
 

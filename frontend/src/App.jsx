@@ -374,7 +374,8 @@ setAccounts([]);
       // It runs alongside the access check (not after it) so startup isn't slower;
       // skipped when the last known access says this user can't edit investments.
       const known = accessRef.current;
-      const cron = (!known.email || known.can('invest', 'edit'))
+      // Never while viewing someone else's data: it's a write, and theirs to run.
+      const cron = !getViewAs() && (!known.email || known.can('invest', 'edit'))
         ? fetch(`${API}/cron/process-recurring`, { method: 'POST', headers: { 'Authorization': `Bearer ${getToken()}` } }).catch(() => console.log("Cron passed"))
         : Promise.resolve();
 

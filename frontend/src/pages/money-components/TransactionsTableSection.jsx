@@ -9,6 +9,23 @@ import BulkEditTransactionModal from '../../components/BulkEditTransactionModal'
 import SheetEntryRow from './SheetEntryRow';
 import { useAccess } from '../../access/AccessContext';
 
+let measureCtx;
+/**
+ * Width the Account column needs for its longest name, measured in the cell's
+ * own font: emoji + gap + name + the cell's side padding (see .tx-row>span).
+ */
+function accountColumnWidth(names, compact) {
+  if (!names.length || typeof document === 'undefined') return 0;
+  const rem = parseFloat(getComputedStyle(document.documentElement).fontSize) || 16;
+  const size = (compact ? 0.8 : 0.85) * rem;
+  measureCtx = measureCtx || document.createElement('canvas').getContext('2d');
+  if (!measureCtx) return 0;
+  measureCtx.font = `500 ${size}px 'DM Sans', sans-serif`;
+  const longest = Math.max(...names.map(n => measureCtx.measureText(n).width));
+  const padding = (compact ? 0.9 : 1.5) * rem * 2;
+  return Math.ceil(longest + size * 1.4 + 0.5 * rem + padding + 6);
+}
+
 export default function TransactionsTableSection({
   dropdownRef,
   openDropdown,
@@ -79,8 +96,14 @@ export default function TransactionsTableSection({
   // markup (see .with-bal in index.css) so the phone card layout is untouched.
   // Compact rows have less padding, so their columns shrink with them.
   const w = (col, min) => compact ? Math.max(min, Math.round(colWidths[col] * 0.8)) : colWidths[col];
+  // Never narrower than the longest account name on hand (card names run long).
+  const accountNames = useMemo(
+    () => [...new Set([...accounts.map(a => a.account), ...paginatedRows.map(t => t.account)].filter(Boolean))],
+    [accounts, paginatedRows]
+  );
+  const accountFit = useMemo(() => accountColumnWidth(accountNames, compact), [accountNames, compact]);
   const fixedCols = [
-    w('checkbox', 40), w('date', 76), w('account', 130), w('type', 84), w('month', 84), w('amount', 96),
+    w('checkbox', 40), w('date', 76), Math.max(w('account', 130), accountFit), w('type', 84), w('month', 84), w('amount', 96),
     ...(withBalances ? [compact ? 112 : 140] : []), w('heading', 100),
   ];
   const descMin = compact ? 180 : 220;
@@ -615,7 +638,7 @@ export default function TransactionsTableSection({
                 {cell('date', 'tx-date', formatDate(t.date))}
                 {cell('account', 'tx-account', <>
                   <span>{getBankEmoji(t.account)}</span>
-                  <span>{t.account}</span>
+                  <span className="tx-account-name" title={t.account}>{t.account}</span>
                 </>)}
                 {cell('type', 'tx-type-cell', <span className={`tx-badge ${t.type.toLowerCase()}`}>{t.type.charAt(0).toUpperCase() + t.type.slice(1)}</span>)}
                 <span className="tx-month">{monthLabel}</span>

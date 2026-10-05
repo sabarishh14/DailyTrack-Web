@@ -100,6 +100,14 @@ class SharingApiTest(unittest.TestCase):
         self.assertEqual(self.ok("GET", "/api/accounts", OWNER)[0]["balance"], 900)
         self.assertEqual(len(self.ok("GET", "/api/transactions", OWNER)["transactions"]), 1)
 
+    def test_the_money_page_loads_while_viewing(self):
+        # Its table and analyzer read through POST (the filters ride in the body).
+        self.owner_has_money()
+        self.share(["money"])
+        rows = self.ok("POST", "/api/transactions/query", FRIEND, {}, view_as=OWNER)
+        self.assertTrue(rows["success"], rows)
+        self.assertTrue(self.ok("POST", "/api/money/analyze", FRIEND, {}, view_as=OWNER)["success"])
+
     def test_shared_routines_are_visible(self):
         self.ok("POST", "/api/routines", OWNER, {"name": "Gym", "schedule": "daily", "start_date": "2026-09-01"})
         self.assertEqual(self.call("GET", "/api/routines", FRIEND, view_as=OWNER).status_code, 403)

@@ -1170,6 +1170,13 @@ body {
   white-space: nowrap;
 }
 
+/* The column fits the longest name; if it's dragged narrower, trim rather than spill. */
+.tx-account-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
 .tx-type-cell {
   display: flex;
   align-items: center;
