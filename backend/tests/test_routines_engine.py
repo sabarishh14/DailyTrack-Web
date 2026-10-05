@@ -212,15 +212,19 @@ class StreakTest(unittest.TestCase):
 
 
 class BeforeItWasAddedTest(unittest.TestCase):
-    def test_blank_days_before_a_routine_was_added_dont_count_as_missed(self):
+    def test_blank_days_from_the_start_date_count_however_late_it_was_added(self):
+        # Started Monday, added Thursday: Monday to Wednesday are days to fill in.
         sugar = daily(1, created_on=day(3))
         blank = engine([sugar])
         self.assertAlmostEqual(blank.consistency(day(4)).fraction, 0.0)
-        self.assertEqual(blank.day_stats(MON).total, 0)
-        filled = engine([sugar], at(sugar, MON, DONE), at(sugar, day(1), DONE), at(sugar, day(3), DONE))
+        self.assertEqual((blank.day_stats(MON).total, blank.day_stats(MON).unanswered), (1, 1))
+        # A gap left on Wednesday still counts against it, added later or not.
+        gap = engine([sugar], at(sugar, MON, DONE), at(sugar, day(1), DONE), at(sugar, day(3), DONE))
+        self.assertAlmostEqual(gap.consistency(day(4)).fraction, 0.75)
+        filled = engine([sugar], *(at(sugar, day(n), DONE) for n in range(4)))
         self.assertAlmostEqual(filled.consistency(day(4)).fraction, 1.0)
-        self.assertEqual(filled.streak(sugar, day(4)).current, 3)
-        self.assertEqual(filled.perfect_days(day(4)).current, 3)
+        self.assertEqual(filled.streak(sugar, day(4)).current, 4)
+        self.assertEqual(filled.perfect_days(day(4)).current, 4)
 
     def test_weeks_that_ended_before_a_routine_was_added_count_only_once_filled_in(self):
         gym = weekly(1, target=3, created_on=day(8))

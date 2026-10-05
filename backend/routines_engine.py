@@ -48,7 +48,14 @@ class Routine:
         return not self.archived and day >= self.start_date and (self.end_date is None or day <= self.end_date)
 
     def counts_if_unanswered(self, day):
-        """Whether leaving [day] blank counts as a miss: not before it was added."""
+        """Whether leaving [day] blank counts as a miss: from the start date on, it
+        does. That's when the routine began, whenever it was added here, so its
+        blank days are days to fill in."""
+        return day >= self.start_date
+
+    def added_by(self, day):
+        """[day] is on or after the day it was added here. A chore already overdue
+        when added isn't late."""
         return day >= (self.created_on or self.start_date)
 
     def challenge_day(self, day):
@@ -453,4 +460,4 @@ class RoutineEngine:
             decided = (cycle.deadline, False)
         else:
             return None
-        return decided if routine.counts_if_unanswered(decided[0]) else None
+        return decided if routine.added_by(decided[0]) else None
