@@ -10511,3 +10511,59 @@ input[type="date"]::-webkit-calendar-picker-indicator {
 @media (max-width: 768px) {
   .view-banner { padding: 0.5rem 1rem; }
 }
+
+/* ── Mutual funds (components/FundsModal.jsx) ───────────────────────────── */
+.fd-modal { max-width: 560px; width: 100%; }
+.fd-modal .modal-header { display: flex; align-items: center; justify-content: space-between; gap: 1rem; }
+.fd-total { font-family: 'Syne', sans-serif; font-weight: 700; font-size: 1.1rem; color: var(--accent-text); }
+.fd-modal .modal-body { display: flex; flex-direction: column; gap: 0.85rem; }
+.fd-tabs { display: grid; grid-template-columns: 1fr 1fr; gap: 0.5rem; }
+.fd-tabs button {
+  padding: 0.7rem; border-radius: 12px; border: 1px solid var(--border); background: var(--bg3);
+  color: var(--text); font: inherit; font-weight: 600; cursor: pointer; transition: background 0.15s, border-color 0.15s;
+}
+.fd-tabs button:hover { border-color: rgba(var(--accent-rgb), 0.45); }
+.fd-tabs button.on { background: rgba(var(--accent-rgb), 0.14); border-color: rgba(var(--accent-rgb), 0.55); color: var(--accent-text); }
+.fd-panel { display: flex; flex-direction: column; gap: 0.6rem; padding: 0.9rem; border-radius: 14px; background: var(--card2); border: 1px solid var(--border); }
+.fd-panel.inline { margin-top: 0.6rem; padding: 0.7rem; }
+.fd-row { display: flex; gap: 0.5rem; flex-wrap: wrap; }
+.fd-row > .inp { flex: 1 1 120px; }
+.fd-day { flex: 0 0 84px !important; }
+.fd-since { display: flex; align-items: center; gap: 0.4rem; flex: 1 1 170px; font-size: 0.8rem; color: var(--text3); }
+.fd-file { position: relative; display: flex; align-items: center; justify-content: center; min-height: 56px; border-radius: 12px;
+  border: 1.5px dashed var(--border2); background: var(--bg3); color: var(--text3); cursor: pointer; text-align: center; padding: 0.6rem; }
+.fd-file.picked { border-style: solid; border-color: rgba(var(--accent-rgb), 0.5); color: var(--text); }
+.fd-file input { position: absolute; inset: 0; opacity: 0; cursor: pointer; }
+.fd-file span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 100%; }
+.fd-hint { margin: 0; font-size: 0.75rem; color: var(--text2); }
+.fd-error { font-size: 0.8rem; color: var(--neg); }
+.fd-note { padding: 0.6rem 0.8rem; border-radius: 10px; background: rgba(52, 211, 153, 0.1); color: var(--pos); font-size: 0.85rem; cursor: pointer; }
+.fd-empty { padding: 1.2rem 0.4rem; text-align: center; color: var(--text3); font-size: 0.85rem; line-height: 1.5; }
+.fd-results { display: flex; flex-direction: column; border-radius: 12px; border: 1px solid var(--border); overflow: hidden; }
+.fd-result { display: flex; justify-content: space-between; align-items: center; gap: 0.75rem; padding: 0.6rem 0.8rem; background: var(--bg3);
+  border: none; border-bottom: 1px solid var(--border); color: var(--text); font: inherit; font-size: 0.85rem; text-align: left; cursor: pointer; }
+.fd-result:last-child { border-bottom: none; }
+.fd-result:hover { background: rgba(var(--accent-rgb), 0.1); }
+.fd-result small { color: var(--text2); white-space: nowrap; }
+.fd-picked { display: flex; align-items: center; justify-content: space-between; gap: 0.5rem; padding: 0.6rem 0.8rem; border-radius: 10px;
+  background: rgba(var(--accent-rgb), 0.12); font-weight: 600; font-size: 0.88rem; }
+.fd-x { background: none; border: none; color: var(--text3); cursor: pointer; font-size: 0.9rem; }
+.fd-check { display: flex; align-items: center; gap: 0.5rem; font-size: 0.85rem; color: var(--text); cursor: pointer; }
+.fd-list { display: flex; flex-direction: column; gap: 0.5rem; }
+.fd-fund { padding: 0.8rem 0.9rem; border-radius: 14px; background: var(--card2); border: 1px solid var(--border); }
+.fd-fund.sold { opacity: 0.55; }
+.fd-fund-top { display: flex; justify-content: space-between; gap: 0.75rem; }
+.fd-fund-name { display: flex; flex-direction: column; gap: 0.15rem; min-width: 0; }
+.fd-fund-name b { font-size: 0.9rem; }
+.fd-fund-name small, .fd-fund-value small { font-size: 0.75rem; color: var(--text2); }
+.fd-fund-value { display: flex; flex-direction: column; align-items: flex-end; gap: 0.15rem; white-space: nowrap; }
+.fd-fund-value b { font-family: 'Syne', sans-serif; }
+.fd-fund-value small.up { color: var(--pos); }
+.fd-fund-value small.down { color: var(--neg); }
+.fd-fund-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 0.4rem; margin-top: 0.55rem; }
+.fd-chip { display: inline-flex; align-items: center; gap: 0.35rem; padding: 0.2rem 0.3rem 0.2rem 0.6rem; border-radius: 999px;
+  background: rgba(var(--accent-rgb), 0.12); color: var(--accent-text); font-size: 0.75rem; font-weight: 600; }
+.fd-chip button { background: none; border: none; color: inherit; cursor: pointer; font-size: 0.7rem; padding: 0 0.25rem; }
+.fd-link { background: none; border: none; color: var(--accent-text); font: inherit; font-size: 0.78rem; font-weight: 600; cursor: pointer; padding: 0.2rem 0.3rem; }
+.fd-link.danger { color: var(--text2); margin-left: auto; }
+.fd-link.danger:hover { color: var(--neg); }

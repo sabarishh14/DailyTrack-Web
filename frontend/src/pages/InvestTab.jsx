@@ -10,6 +10,7 @@ import { getToken, formatDate, fmt } from '../utils';
 import MultiAssetSelect from '../components/MultiAssetSelect';
 import CustomSelect from '../components/CustomSelect';
 import AddManualAssetModal from '../components/AddManualAssetModal';
+import FundsModal from '../components/FundsModal';
 import EditManualAssetModal from '../components/EditManualAssetModal';
 import PinLockOverlay from './invest-components/PinLockOverlay';
 import { useAccess } from '../access/AccessContext';
@@ -35,6 +36,7 @@ function InvestTab({ investments, manualAssets, assetList, onAdd }) {
     const handleEsc = (e) => {
       if (e.key === 'Escape') {
         setIsAddModalOpen(false);
+        setIsFundsOpen(false);
         setEditingAsset(null);
         setDrillDownDate(null);
         setShowAssetSettings(false);
@@ -180,6 +182,7 @@ function InvestTab({ investments, manualAssets, assetList, onAdd }) {
 
   const [expandedSection, setExpandedSection] = useState('MARKET');
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
+  const [isFundsOpen, setIsFundsOpen] = useState(false);
   const [showBalances, setShowBalances] = useState(false);
   const [invCurrentPage, setInvCurrentPage] = useState(0);
   const [invRowsPerPage, setInvRowsPerPage] = useState(5);
@@ -795,6 +798,9 @@ function InvestTab({ investments, manualAssets, assetList, onAdd }) {
                 <>
                   <button className="action-btn" style={{ flex: 1, minWidth: '120px', justifyContent: 'center', background: 'var(--bg3)', border: '1px solid var(--border)', color: 'var(--text)', boxShadow: 'none' }} onClick={() => setIsAddModalOpen(true)}>
                     ➕ Add Asset
+                  </button>
+                  <button className="action-btn" style={{ flex: 1, minWidth: '120px', justifyContent: 'center', background: 'var(--bg3)', border: '1px solid var(--border)', color: 'var(--text)', boxShadow: 'none' }} onClick={() => setIsFundsOpen(true)}>
+                    📄 Mutual funds
                   </button>
                   {isOwner && (
                   <>
@@ -1521,6 +1527,7 @@ function InvestTab({ investments, manualAssets, assetList, onAdd }) {
 
         {/* Render the Add Modal if state is true */}
         {isAddModalOpen && <AddManualAssetModal onClose={() => setIsAddModalOpen(false)} onAdd={onAdd} />}
+        {isFundsOpen && <FundsModal onClose={() => setIsFundsOpen(false)} onChanged={onAdd} />}
         {editingAsset && <EditManualAssetModal asset={editingAsset} onClose={() => setEditingAsset(null)} onRefresh={onAdd} />}
 
         {/* Drill-down Modal (Shared for MF & Equity) */}

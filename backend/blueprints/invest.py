@@ -12,6 +12,7 @@ from extensions import (
 )
 from models import *
 from access import require_api_key, require_admin, require_access, current_access, owner_only
+import funds_service
 
 import hashlib
 from dateutil.relativedelta import relativedelta
@@ -115,6 +116,8 @@ def get_portfolio_xirr():
 @invest_bp.route('/api/investments', methods=['GET'])
 @require_access("invest")
 def get_investments():
+    # The first look each day values funds held outside Kite and adds due SIPs.
+    funds_service.refresh_if_due()
     records = PortfolioSnapshot.query.order_by(PortfolioSnapshot.date.desc()).all()
 
     result = [
@@ -382,8 +385,9 @@ def sync_kite_direct():
         ist_timezone = pytz.timezone('Asia/Kolkata')
         today_date = datetime.now(ist_timezone).date()
         
-        # 1. Check if already synced today
-        if PortfolioSnapshot.query.filter_by(date=today_date).first():
+        # 1. Check if already synced today. (Today's snapshot may already exist
+        # from valuing funds held outside Kite; the sync adds to it.)
+        if EquityHolding.query.filter_by(date=today_date).first() or MutualFundHolding.query.filter_by(date=today_date).first():
             return jsonify({"success": False, "message": f"Already synced investments for {today_date.strftime('%d/%m/%Y')}!"})
 
         # 2. Auth with Kite
@@ -478,40 +482,14 @@ def sync_kite_direct():
             ))
 
         # ==========================================
-        # 5. CALCULATE TOTALS (KITE + MANUAL)
+        # 5. SAVE, THEN TODAY'S TOTALS
         # ==========================================
-        manual_assets = ManualAsset.query.all()
-        
-        fixed_inv = sum(a.invested_value for a in manual_assets if a.category in ['FD', 'RD', 'Cash'])
-        fixed_curr = sum(a.current_value for a in manual_assets if a.category in ['FD', 'RD', 'Cash'])
-        
-        
-        prov_inv = sum(a.invested_value for a in manual_assets if a.category in ['EPF', 'PPF', 'NPS'])
-        prov_curr = sum(a.current_value for a in manual_assets if a.category in ['EPF', 'PPF', 'NPS'])
-        
-        gold_inv = sum(a.invested_value for a in manual_assets if a.category == 'SGB')
-        gold_curr = sum(a.current_value for a in manual_assets if a.category == 'SGB')
-
-        grand_inv = eq_total_inv + mf_total_inv + fixed_inv + prov_inv + gold_inv
-        grand_curr = eq_total_curr + mf_total_curr + fixed_curr + prov_curr + gold_curr
-
-        # ==========================================
-        # 6. SAVE TO DATABASE
-        # ==========================================
-        new_snapshot = PortfolioSnapshot(
-            id=int(datetime.now().timestamp() * 1000), 
-            date=today_date,
-            total_equity_inv=eq_total_inv, total_equity_curr=eq_total_curr,
-            total_mf_inv=mf_total_inv, total_mf_curr=mf_total_curr,
-            total_fixed_income_inv=fixed_inv, total_fixed_income_curr=fixed_curr,
-            total_provident_inv=prov_inv, total_provident_curr=prov_curr,
-            total_gold_inv=gold_inv, total_gold_curr=gold_curr,
-            grand_total_inv=grand_inv, grand_total_curr=grand_curr
-        )
-        
-        db.session.add(new_snapshot)
+        # Kite + funds held outside it + manual assets, worked out in one place
+        # (funds_service.recompute_snapshot) so every path agrees.
         db.session.add_all(mf_records)
         db.session.add_all(eq_records)
+        db.session.flush()
+        funds_service.recompute_snapshot(today_date)
         db.session.commit()
 
         return jsonify({"success": True, "message": f"Successfully synced Combined Portfolio!"})
@@ -526,7 +504,9 @@ def sync_kite_direct():
 @require_access("invest")
 def get_daily_equity_holdings(date_str):
     date_obj = datetime.strptime(date_str, '%Y-%m-%d').date()
-    holdings = EquityHolding.query.filter_by(date=date_obj).all()
+    # A day without a Kite sync shows the last one, as its snapshot does.
+    kite_day = funds_service.last_kite_day(date_obj)
+    holdings = EquityHolding.query.filter_by(date=kite_day).all() if kite_day else []
     return jsonify([{
         "symbol": h.symbol,
         "quantity": h.quantity,
@@ -588,8 +568,10 @@ def sync_investments_to_sheets():
 @require_access("invest")
 def get_daily_holdings(date_str):
     date_obj = datetime.strptime(date_str, '%Y-%m-%d').date()
-    holdings = MutualFundHolding.query.filter_by(date=date_obj).all()
-    return jsonify([{
+    # Kite's (its last sync on or before the day) and funds held outside it.
+    kite_day = funds_service.last_kite_day(date_obj)
+    holdings = MutualFundHolding.query.filter_by(date=kite_day).all() if kite_day else []
+    rows = [{
         "symbol": h.symbol,
         "quantity": h.quantity,
         "average_price": h.average_price,
@@ -597,7 +579,17 @@ def get_daily_holdings(date_str):
         "invested_value": h.invested_value,
         "current_value": h.current_value,
         "ret_pct": ((h.current_value - h.invested_value) / h.invested_value * 100) if h.invested_value > 0 else 0
-    } for h in holdings])
+    } for h in holdings]
+    rows += [{
+        "symbol": f.name,
+        "quantity": f.units,
+        "average_price": round(f.invested / f.units, 4) if f.units else 0,
+        "nav": f.nav,
+        "invested_value": f.invested,
+        "current_value": f.value,
+        "ret_pct": ((f.value - f.invested) / f.invested * 100) if f.invested > 0 else 0
+    } for f in FundValue.query.filter_by(date=date_obj).all()]
+    return jsonify(rows)
 @invest_bp.route('/api/assets/list', methods=['GET'])
 @require_access("invest")
 def get_asset_list():
@@ -607,6 +599,9 @@ def get_asset_list():
     
     latest_mf_date = db.session.query(db.func.max(MutualFundHolding.date)).scalar()
     mf_symbols = [r[0] for r in db.session.query(MutualFundHolding.symbol).filter(MutualFundHolding.date == latest_mf_date).all()] if latest_mf_date else []
+    latest_fund_day = db.session.query(db.func.max(FundValue.date)).scalar()
+    if latest_fund_day:
+        mf_symbols += [r[0] for r in db.session.query(FundValue.name).filter(FundValue.date == latest_fund_day).all()]
     
     manual_assets = ManualAsset.query.all()
     
@@ -633,6 +628,9 @@ def get_asset_history():
     elif asset_type == 'MF':
         history = MutualFundHolding.query.filter_by(symbol=symbol).order_by(MutualFundHolding.date.asc()).all()
         data = [{"date": h.date.strftime("%Y-%m-%d"), "Current": h.current_value, "Invested": h.invested_value} for h in history]
+        own = FundValue.query.filter_by(name=symbol).order_by(FundValue.date.asc()).all()
+        data += [{"date": f.date.strftime("%Y-%m-%d"), "Current": f.value, "Invested": f.invested} for f in own]
+        data.sort(key=lambda point: point["date"])
     else:
         # For manual assets, we plot a straight line from creation to today
         asset = ManualAsset.query.filter_by(name=symbol).first()

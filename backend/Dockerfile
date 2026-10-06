@@ -1,4 +1,5 @@
-FROM python:3.10-slim
+# 3.11+: casparser (CAS statement import) needs it.
+FROM python:3.11-slim
 
 # Create the user first
 RUN useradd -m -u 1000 user

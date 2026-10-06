@@ -131,8 +131,77 @@ class PortfolioSnapshot(Owned, db.Model):
     
     grand_total_inv = db.Column(db.Float, default=0.0)
     grand_total_curr = db.Column(db.Float, default=0.0)
-    
+
     synced = db.Column(db.Boolean, default=False)
+
+
+# ---- Mutual funds held outside Kite (funds_service.py) ----
+# Kept apart from Kite's mf_holdings so the two can never collide or count twice;
+# they meet only in the day's PortfolioSnapshot and in the holdings the
+# Investments page reads.
+
+class Fund(Owned, db.Model):
+    """One fund in one folio, from a CAS statement or added by hand."""
+    __tablename__ = "funds"
+    __table_args__ = (db.UniqueConstraint("owner_email", "amfi_code", "folio_ref", name="uq_fund_owner_code_folio"),)
+
+    id = db.Column(BigId, primary_key=True)
+    amfi_code = db.Column(db.String(12), nullable=False)
+    isin = db.Column(db.String(12))
+    name = db.Column(db.String(200), nullable=False)
+    amc = db.Column(db.String(120))
+    # The folio itself is never stored: a hash to match re-imports, and its last 4 to show.
+    folio_ref = db.Column(db.String(16), nullable=False)
+    folio_tail = db.Column(db.String(4))
+    units = db.Column(db.Float, nullable=False, default=0.0)
+    invested = db.Column(Money, nullable=False, default=0)
+    source = db.Column(db.String(8), nullable=False, default="manual")   # cas | manual
+    statement_to = db.Column(db.Date)   # the last CAS read for it runs up to here
+    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+class FundTransaction(Owned, db.Model):
+    """A purchase, redemption, SIP instalment… `key` keeps re-imports from doubling up."""
+    __tablename__ = "fund_transactions"
+    __table_args__ = (db.UniqueConstraint("owner_email", "key", name="uq_fund_tx_owner_key"),)
+
+    id = db.Column(BigId, primary_key=True)
+    fund_id = db.Column(db.BigInteger, db.ForeignKey("funds.id", ondelete="CASCADE"), nullable=False, index=True)
+    date = db.Column(db.Date, nullable=False)
+    kind = db.Column(db.String(24), nullable=False)      # PURCHASE, PURCHASE_SIP, REDEMPTION, STAMP_DUTY_TAX…
+    amount = db.Column(Money)
+    units = db.Column(db.Float)
+    nav = db.Column(db.Float)
+    source = db.Column(db.String(8), nullable=False)     # cas | manual | sip
+    key = db.Column(db.String(40), nullable=False)
+
+
+class FundSip(Owned, db.Model):
+    """A monthly SIP the app adds itself, at each instalment day's NAV."""
+    __tablename__ = "fund_sips"
+
+    id = db.Column(BigId, primary_key=True)
+    fund_id = db.Column(db.BigInteger, db.ForeignKey("funds.id", ondelete="CASCADE"), nullable=False, index=True)
+    amount = db.Column(Money, nullable=False)
+    day = db.Column(db.SmallInteger, nullable=False)     # 1–31; short months take their last day
+    next_date = db.Column(db.Date, nullable=False)
+    active = db.Column(db.Boolean, nullable=False, default=True)
+
+
+class FundValue(Owned, db.Model):
+    """What one fund (all its folios) was worth on one day."""
+    __tablename__ = "fund_values"
+    __table_args__ = (db.UniqueConstraint("owner_email", "date", "amfi_code", name="uq_fund_value_owner_date_code"),)
+
+    id = db.Column(BigId, primary_key=True)
+    date = db.Column(db.Date, nullable=False, index=True)
+    amfi_code = db.Column(db.String(12), nullable=False)
+    name = db.Column(db.String(200), nullable=False)
+    units = db.Column(db.Float, nullable=False)
+    nav = db.Column(db.Float, nullable=False)
+    nav_date = db.Column(db.Date, nullable=False)
+    invested = db.Column(db.Float, nullable=False)
+    value = db.Column(db.Float, nullable=False)
 class SyncLog(db.Model):
     __tablename__ = "sync_log"
     id = db.Column(BigId, primary_key=True)
