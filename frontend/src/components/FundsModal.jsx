@@ -8,11 +8,17 @@ import { fmt, getToken } from '../utils';
 
 const CAMS_CAS = 'https://www.camsonline.com/Investors/Statements/Consolidated-Account-Statement';
 
+// A password field makes Chrome offer to save it once the import finishes, which
+// would keep a statement's password in the browser. A text field drawn as dots
+// isn't one; where dots can't be drawn, it stays a password field.
+const MASKABLE = typeof CSS !== 'undefined' && CSS.supports?.('-webkit-text-security', 'disc');
+
 const auth = () => ({ 'Authorization': `Bearer ${getToken()}` });
 const today = () => new Date().toISOString().slice(0, 10);
 const ordinal = (n) => `${n}${(n % 100 >= 11 && n % 100 <= 13) ? 'th' : ['th', 'st', 'nd', 'rd'][n % 10] || 'th'}`;
 const units = (n) => Number(n).toLocaleString('en-IN', { maximumFractionDigits: 3 });
 const pct = (n) => `${n >= 0 ? '+' : ''}${n.toFixed(1)}%`;
+const signed = (n) => `${n >= 0 ? '+' : '-'}${fmt(Math.abs(Math.round(n)))}`;
 
 async function send(method, path, body) {
   const form = body instanceof FormData;
@@ -179,7 +185,9 @@ function ImportView({ onDone }) {
             )}
           </div>
           <div className="fd-password">
-            <input className="inp" type={showPassword ? 'text' : 'password'} autoComplete="off" placeholder="PDF password"
+            <input className={`inp ${MASKABLE && !showPassword && password ? 'fd-masked' : ''}`}
+                   type={showPassword || MASKABLE ? 'text' : 'password'} placeholder="PDF password"
+                   autoComplete="off" autoCapitalize="off" autoCorrect="off" spellCheck={false}
                    value={password} onChange={e => { setPassword(e.target.value); setError(''); }}
                    onKeyDown={e => { if (e.key === 'Enter') submit(); }} />
             <button type="button" className="fd-eye" onClick={() => setShowPassword(s => !s)}
@@ -265,7 +273,7 @@ function AddView({ onDone }) {
   }
 
   return (
-    <div className="fd-add">
+    <div className="fd-add picked">
       <div className="fd-picked">
         <div>
           <b>{fund.name}</b>
@@ -274,16 +282,19 @@ function AddView({ onDone }) {
         <button className="fd-link" onClick={() => { setFund(null); setQuery(''); }}>Change</button>
       </div>
 
-      <div className="fd-grid">
-        <Field label="Amount invested">
-          <input className="inp" inputMode="decimal" placeholder="₹ 0" value={amount} onChange={e => setAmount(e.target.value)} />
-        </Field>
-        <Field label="On">
-          <input className="inp" type="date" max={today()} value={date} onChange={e => setDate(e.target.value)} />
-        </Field>
+      <div className="fd-box">
+        <span className="fd-box-title">One-time</span>
+        <div className="fd-grid">
+          <Field label="Amount">
+            <input className="inp" inputMode="decimal" placeholder="₹ 0" value={amount} onChange={e => setAmount(e.target.value)} />
+          </Field>
+          <Field label="On">
+            <input className="inp" type="date" max={today()} value={date} onChange={e => setDate(e.target.value)} />
+          </Field>
+        </div>
       </div>
 
-      <div className="fd-sip-box">
+      <div className="fd-box">
         <Switch on={withSip} onChange={setWithSip} label="Monthly SIP" />
         {withSip && (
           <>
@@ -300,13 +311,25 @@ function AddView({ onDone }) {
 }
 
 // ── Your funds ──────────────────────────────────────────────────────────────
-function FundRow({ fund, onChanged }) {
+// Each fund is two lines. Tapping one opens its SIPs and Remove, one fund at a
+// time, so a long list stays short.
+function FundRow({ fund, open, onToggle, onChanged }) {
   const [addingSip, setAddingSip] = useState(false);
   const [sip, setSip] = useState({ amount: '', day: new Date().getDate(), since: today() });
   const [confirming, setConfirming] = useState(null);   // 'remove' | sip id
   const [error, setError] = useState('');
   const held = fund.units > 0;
   const gain = fund.value != null && fund.invested > 0 ? ((fund.value - fund.invested) / fund.invested) * 100 : null;
+  const folios = fund.folios.length ? `folio ${fund.folios.map(f => `••${f}`).join(', ')}` : '';
+  // Its SIPs in brief: a tag on a phone, a column on a wide screen.
+  const [first] = fund.sips;
+  const sipTag = fund.sips.length > 1 ? `${fund.sips.length} SIPs` : first ? `SIP ${fmt(first.amount)}` : null;
+  const sipText = fund.sips.length > 1 ? `${fund.sips.length} SIPs` : first ? `${fmt(first.amount)} · ${ordinal(first.day)}` : null;
+
+  // Closing a fund drops whatever was half done in it.
+  useEffect(() => {
+    if (!open) { setAddingSip(false); setConfirming(null); setError(''); }
+  }, [open]);
 
   const act = async (method, path, body) => {
     setError('');
@@ -318,76 +341,88 @@ function FundRow({ fund, onChanged }) {
   };
 
   const removing = confirming === 'remove';
-  const remove = (
-    <button className="fd-link quiet" onClick={() => setConfirming('remove')} aria-label="Remove" title="Remove"><Trash /></button>
-  );
-  // A sold fund has nothing to do but go: Remove sits beside its name, and the
-  // row only grows a line to confirm. One being given a SIP shows just the form,
-  // and an open question hides the other actions until it's answered.
-  const actions = held ? !addingSip : removing;
 
   return (
-    <li className={`fd-fund ${held ? '' : 'sold'} ${actions || addingSip ? '' : 'bare'}`}>
-      <div className="fd-fund-main">
+    <li className={`fd-fund ${held ? '' : 'sold'} ${open ? 'open' : ''}`}>
+      <div className="fd-fund-main" role="button" tabIndex={0} aria-expanded={open} onClick={onToggle}
+           onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onToggle(); } }}>
         <div className="fd-fund-name">
           <b title={fund.name}>{fund.name}</b>
-          <span className="fd-muted">
+          <span className="fd-muted fd-fund-meta">
             {held ? `${units(fund.units)} units` : 'Sold'}
-            {fund.folios.length > 0 && ` · folio ${fund.folios.map(f => `••${f}`).join(', ')}`}
+            {folios && ` · ${folios}`}
+            {sipTag && !open && <span className="fd-sip-tag">{sipTag}</span>}
           </span>
         </div>
-        {held ? (
-          <div className="fd-fund-value">
-            <b>{fund.value != null ? fmt(Math.round(fund.value)) : '—'}</b>
-            {gain != null && <span className={`fd-gain ${gain >= 0 ? 'up' : 'down'}`}>{pct(gain)}</span>}
-          </div>
-        ) : !removing && remove}
+        {held && (
+          <>
+            <span className="fd-cell units">{units(fund.units)}</span>
+            <span className="fd-cell invested">{fmt(Math.round(fund.invested))}</span>
+            <span className="fd-cell value">{fund.value != null ? fmt(Math.round(fund.value)) : '—'}</span>
+            <span className={`fd-cell returns ${gain == null ? '' : gain >= 0 ? 'up' : 'down'}`}>
+              {gain != null && <><span className="fd-amt">{signed(fund.value - fund.invested)}</span><span className="fd-pct">{pct(gain)}</span></>}
+            </span>
+            <span className={`fd-cell sip ${sipText ? '' : 'none'}`}>{sipText || '—'}</span>
+          </>
+        )}
       </div>
 
-      {actions && (
-        <div className="fd-fund-actions">
-          {held && !removing && fund.sips.map(s => (confirming === s.id ? (
-            <span key={s.id} className="fd-confirm">
-              Stop this SIP?
-              <button className="fd-link danger" onClick={() => act('DELETE', `/funds/sips/${s.id}`)}>Stop</button>
-              <button className="fd-link" onClick={() => setConfirming(null)}>Keep</button>
-            </span>
-          ) : (
-            <span key={s.id} className="fd-chip">
-              SIP {fmt(s.amount)} · {ordinal(s.day)}
-              <button onClick={() => setConfirming(s.id)} aria-label="Stop SIP"><Close /></button>
-            </span>
-          )))}
-          {held && confirming == null && (
-            <button className="fd-link" onClick={() => setAddingSip(true)}><Plus size={14} /> SIP</button>
+      {open && (
+        <div className="fd-fund-more">
+          {/* An open question hides the other actions until it's answered. */}
+          {!addingSip && (
+            <div className="fd-fund-actions">
+              {held && folios && <span className="fd-muted fd-more-folio">{folios}</span>}
+              {held && !removing && fund.sips.map(s => (confirming === s.id ? (
+                <span key={s.id} className="fd-confirm">
+                  Stop this SIP?
+                  <button className="fd-link danger" onClick={() => act('DELETE', `/funds/sips/${s.id}`)}>Stop</button>
+                  <button className="fd-link" onClick={() => setConfirming(null)}>Keep</button>
+                </span>
+              ) : (
+                <span key={s.id} className="fd-chip">
+                  SIP {fmt(s.amount)} · {ordinal(s.day)}
+                  <button onClick={() => setConfirming(s.id)} aria-label="Stop SIP"><Close /></button>
+                </span>
+              )))}
+              {held && confirming == null && (
+                <button className="fd-link" onClick={() => setAddingSip(true)}><Plus size={14} /> SIP</button>
+              )}
+              <span className="fd-spacer" />
+              {removing ? (
+                <span className="fd-confirm">
+                  Remove it and its history?
+                  <button className="fd-link danger" onClick={() => act('DELETE', `/funds/${fund.code}`)}>Remove</button>
+                  <button className="fd-link" onClick={() => setConfirming(null)}>Cancel</button>
+                </span>
+              ) : confirming == null && (
+                <button className="fd-link quiet" onClick={() => setConfirming('remove')} aria-label="Remove" title="Remove"><Trash /></button>
+              )}
+            </div>
           )}
-          <span className="fd-spacer" />
-          {removing ? (
-            <span className="fd-confirm">
-              Remove it and its history?
-              <button className="fd-link danger" onClick={() => act('DELETE', `/funds/${fund.code}`)}>Remove</button>
-              <button className="fd-link" onClick={() => setConfirming(null)}>Cancel</button>
-            </span>
-          ) : confirming == null && remove}
+          {addingSip && (
+            <div className="fd-inline">
+              <SipFields sip={sip} onChange={setSip} />
+              <div className="fd-inline-actions">
+                <button className="fd-btn ghost" onClick={() => setAddingSip(false)}>Cancel</button>
+                <button className="fd-btn primary" disabled={!(Number(sip.amount) > 0)} onClick={() => act('POST', `/funds/${fund.code}/sip`, sip)}>Start SIP</button>
+              </div>
+            </div>
+          )}
+          {error && <p className="fd-error">{error}</p>}
         </div>
       )}
-
-      {addingSip && (
-        <div className="fd-inline">
-          <SipFields sip={sip} onChange={setSip} />
-          <div className="fd-inline-actions">
-            <button className="fd-btn ghost" onClick={() => setAddingSip(false)}>Cancel</button>
-            <button className="fd-btn primary" disabled={!(Number(sip.amount) > 0)} onClick={() => act('POST', `/funds/${fund.code}/sip`, sip)}>Start SIP</button>
-          </div>
-        </div>
-      )}
-      {error && <p className="fd-error">{error}</p>}
     </li>
   );
 }
 
 function FundsList({ funds, note, onDismissNote, onImport, onAdd, onChanged }) {
   const [showSold, setShowSold] = useState(false);
+  const [open, setOpen] = useState(null);   // code of the fund showing its actions
+  const row = (f) => (
+    <FundRow key={f.code} fund={f} open={open === f.code} onChanged={onChanged}
+             onToggle={() => setOpen(o => (o === f.code ? null : f.code))} />
+  );
   const held = funds.filter(f => f.units > 0);
   const sold = funds.filter(f => f.units <= 0);
   const value = held.reduce((s, f) => s + (f.value || 0), 0);
@@ -397,13 +432,20 @@ function FundsList({ funds, note, onDismissNote, onImport, onAdd, onChanged }) {
   return (
     <div className="fd-list-view">
       <div className="fd-summary">
-        <div>
+        <div className="fd-stat main">
+          <span className="fd-stat-label">Current value</span>
           <span className="fd-summary-value">{fmt(Math.round(value))}</span>
-          <span className="fd-muted">
-            Invested {fmt(Math.round(invested))}
-            {gain != null && <span className={`fd-gain ${gain >= 0 ? 'up' : 'down'}`}>{pct(gain)}</span>}
-          </span>
         </div>
+        <div className="fd-stat">
+          <span className="fd-stat-label">Invested</span>
+          <span className="fd-stat-value">{fmt(Math.round(invested))}</span>
+        </div>
+        {gain != null && (
+          <div className="fd-stat">
+            <span className="fd-stat-label">Returns</span>
+            <span className={`fd-stat-value ${gain >= 0 ? 'up' : 'down'}`}>{signed(value - invested)} <small>{pct(gain)}</small></span>
+          </div>
+        )}
         <div className="fd-summary-actions">
           <button className="fd-btn ghost" onClick={onImport}><Doc size={16} /> Import</button>
           <button className="fd-btn primary" onClick={onAdd}><Plus size={16} /> Add</button>
@@ -416,16 +458,21 @@ function FundsList({ funds, note, onDismissNote, onImport, onAdd, onChanged }) {
         </button>
       )}
 
-      <ul className="fd-funds">
-        {held.map(f => <FundRow key={f.code} fund={f} onChanged={onChanged} />)}
-      </ul>
+      {held.length > 0 && (
+        <div className="fd-table">
+          <div className="fd-thead" aria-hidden="true">
+            <span>Fund</span><span>Units</span><span>Invested</span><span>Current</span><span>Returns</span><span>SIP</span>
+          </div>
+          <ul className="fd-funds">{held.map(row)}</ul>
+        </div>
+      )}
 
       {sold.length > 0 && (
         <>
           <button className="fd-sold-toggle" onClick={() => setShowSold(s => !s)}>
             Sold ({sold.length}) <Chevron open={showSold} />
           </button>
-          {showSold && <ul className="fd-funds">{sold.map(f => <FundRow key={f.code} fund={f} onChanged={onChanged} />)}</ul>}
+          {showSold && <div className="fd-table"><ul className="fd-funds">{sold.map(row)}</ul></div>}
         </>
       )}
     </div>
