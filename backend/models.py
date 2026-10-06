@@ -108,6 +108,9 @@ class ManualAsset(Owned, db.Model):
     start_date = db.Column(db.Date, nullable=True) # <-- ADD THIS LINE
     maturity_date = db.Column(db.Date, nullable=True)
     last_updated = db.Column(db.Date, nullable=False)
+    # RD only: the monthly deposit. Its invested and current values are worked
+    # out from the instalments (invest.recurring_deposit), never typed in.
+    installment = db.Column(db.Float, nullable=True)
 class PortfolioSnapshot(Owned, db.Model):
     __tablename__ = "portfolio_snapshots"
 

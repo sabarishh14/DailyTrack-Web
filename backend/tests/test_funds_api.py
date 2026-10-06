@@ -65,7 +65,9 @@ def statement(units=10.0, cost=950.0, to=TODAY - timedelta(days=1), transactions
     }
 
 
-class FundsApiTest(unittest.TestCase):
+class ApiCase(unittest.TestCase):
+    """The app with the investment endpoints, stand-in NAVs and request helpers."""
+
     def setUp(self):
         self.app = Flask(__name__)
         self.app.config.update(SQLALCHEMY_DATABASE_URI="sqlite://", TESTING=True)
@@ -123,12 +125,14 @@ class FundsApiTest(unittest.TestCase):
                                          average_price=1000, ltp=1500, invested_value=2000, current_value=3000))
             db.session.commit()
 
+
+class FundsApiTest(ApiCase):
     # ---- statements ----
     def test_a_statement_brings_in_its_funds_valued_at_todays_nav(self):
         result = self.imported(statement())
         self.assertEqual(result["added"], ["Parag Parikh Flexi Cap Fund"])
         fund = self.ok("GET", "/api/funds")["funds"][0]
-        self.assertEqual((fund["units"], fund["invested"], fund["value"], fund["folios"]), (10.0, 950.0, 900.0, ["7/89"]))
+        self.assertEqual((fund["units"], fund["invested"], fund["value"], fund["folios"]), (10.0, 950.0, 900.0, ["4567"]))
         self.assertEqual(len(self.rows(FundTransaction)), 3)
 
         snap = self.ok("GET", "/api/investments")[0]
@@ -141,6 +145,11 @@ class FundsApiTest(unittest.TestCase):
         self.imported(statement())
         fund = self.rows(Fund)[0]
         self.assertNotIn("1234567", f"{fund.folio_ref}{fund.folio_tail}")
+
+    def test_a_folio_shows_as_the_last_4_of_its_number(self):
+        # CAMS writes folios as "number / check digit".
+        self.assertEqual([funds_service.folio_tail(f) for f in ("91012345678 / 0", "1234567/89", "AB12C34")],
+                         ["5678", "4567", "2C34"])
 
     def test_importing_again_changes_nothing(self):
         self.imported(statement())
@@ -264,6 +273,63 @@ class FundsApiTest(unittest.TestCase):
     def test_search_finds_funds_by_any_words(self):
         results = self.ok("GET", "/api/funds/search?q=parag%20flexi")["results"]
         self.assertEqual([r["code"] for r in results], ["122639"])
+
+
+class RecurringDepositTest(ApiCase):
+    """RDs (manual assets): one instalment a month, each compounding quarterly
+    from its own day, until maturity. Nothing is typed in but the terms."""
+
+    def rd(self, start, months=12, installment=5000, rate=7.0, who=FRIEND):
+        body = {"category": "RD", "name": "SBI RD", "installment": installment, "interest_rate": rate,
+                "start_date": start.isoformat(), "maturity_date": (start + funds_service.relativedelta(months=months)).isoformat(),
+                "invested_value": "", "current_value": ""}
+        return self.call("POST", "/api/manual_assets", who, body)
+
+    @staticmethod
+    def expected(start, months, installment, rate, on):
+        maturity = start + funds_service.relativedelta(months=months)
+        end = min(on, maturity)
+        dues = [start + funds_service.relativedelta(months=k) for k in range(months)]
+        dues = [d for d in dues if d <= end]
+        worth = sum(installment * (1 + rate / 400) ** (4 * (end - d).days / 365.25) for d in dues)
+        return round(installment * len(dues), 2), round(worth, 2)
+
+    def asset(self, who=FRIEND):
+        return self.ok("GET", "/api/manual_assets", who)[0]
+
+    def test_an_rd_adds_its_instalments_and_their_interest(self):
+        start = TODAY - timedelta(days=95)
+        self.assertEqual(self.rd(start).status_code, 200)
+        rd = self.asset()
+        deposited, worth = self.expected(start, 12, 5000, 7.0, TODAY)
+        self.assertEqual((rd["installment"], rd["invested_value"], rd["current_value"]), (5000, deposited, worth))
+        self.assertGreater(rd["current_value"], rd["invested_value"])
+        self.assertEqual(deposited, 5000 * 4)   # ~3 months in: the 4th instalment is paid
+
+    def test_an_rd_stops_at_maturity(self):
+        start = TODAY - timedelta(days=800)
+        self.rd(start, months=12)
+        rd = self.asset()
+        self.assertEqual((rd["invested_value"], rd["current_value"]),
+                         self.expected(start, 12, 5000, 7.0, start + funds_service.relativedelta(months=12)))
+        self.assertEqual(rd["invested_value"], 60000)
+
+    def test_an_rd_needs_its_instalment(self):
+        resp = self.rd(TODAY - timedelta(days=10), installment="")
+        self.assertEqual((resp.status_code, resp.get_json()["message"]), (400, "Enter the monthly instalment"))
+
+    def test_the_daily_job_never_compounds_an_rd_like_an_fd(self):
+        start = TODAY - timedelta(days=200)
+        self.rd(start)
+        self.ok("POST", "/api/cron/process-recurring")
+        rd = self.asset()
+        self.assertEqual((rd["invested_value"], rd["current_value"]), self.expected(start, 12, 5000, 7.0, TODAY))
+
+    def test_an_rd_counts_as_fixed_income(self):
+        start = TODAY - timedelta(days=95)
+        self.rd(start)
+        snap = self.ok("GET", "/api/investments")[0]
+        self.assertEqual((snap["inv_fixed"], snap["curr_fixed"]), self.expected(start, 12, 5000, 7.0, TODAY))
 
 
 class AmfiFileTest(unittest.TestCase):

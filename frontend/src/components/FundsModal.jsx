@@ -35,9 +35,30 @@ function SipFields({ sip, onChange }) {
   );
 }
 
-function ImportStatement({ onDone }) {
+const CAMS_CAS = 'https://www.camsonline.com/Investors/Statements/Consolidated-Account-Statement';
+
+/** The CAMS form, field by field: one statement covers every fund (CAMS and KFintech). */
+function HowToGetCas({ open }) {
+  return (
+    <details className="fd-howto" open={open}>
+      <summary>How to get your CAS</summary>
+      <ol>
+        <li>Open <a href={CAMS_CAS} target="_blank" rel="noopener noreferrer">CAMS → Consolidated Account Statement ↗</a> and tick the disclaimer.</li>
+        <li>Statement type: <b>Detailed</b></li>
+        <li>Period: <b>Specific Period</b>, from <b>01-Jan-1990</b> to today. Any date before your first investment works; earlier just means complete history.</li>
+        <li>Folio listing: <b>With zero balance folios</b></li>
+        <li>Your email (PAN is optional).</li>
+        <li>Set a <b>password</b> and confirm it. You'll type it here.</li>
+        <li>Submit. The PDF arrives by email in a few minutes; upload it below.</li>
+      </ol>
+    </details>
+  );
+}
+
+function ImportStatement({ onDone, firstTime }) {
   const [file, setFile] = useState(null);
   const [password, setPassword] = useState('');
+  const [showPassword, setShowPassword] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
 
@@ -62,17 +83,25 @@ function ImportStatement({ onDone }) {
 
   return (
     <div className="fd-panel">
+      <HowToGetCas open={firstTime && !file} />
       <label className={`fd-file ${file ? 'picked' : ''}`}>
         <input type="file" accept="application/pdf,.pdf" onChange={e => { setFile(e.target.files?.[0] || null); setError(''); }} />
         <span>{file ? `📄 ${file.name}` : '📄 Choose your CAS PDF'}</span>
       </label>
-      <input className="inp" type="password" autoComplete="off" placeholder="PDF password" value={password}
-             onChange={e => { setPassword(e.target.value); setError(''); }} />
+      <div className="fd-password">
+        <input className="inp" type={showPassword ? 'text' : 'password'} autoComplete="off" placeholder="PDF password" value={password}
+               onChange={e => { setPassword(e.target.value); setError(''); }}
+               onKeyDown={e => { if (e.key === 'Enter' && file && password && !busy) submit(); }} />
+        <button type="button" className="fd-eye" onClick={() => setShowPassword(s => !s)}
+                aria-label={showPassword ? 'Hide password' : 'Show password'} title={showPassword ? 'Hide' : 'Show'}>
+          {showPassword ? '🙈' : '👁️'}
+        </button>
+      </div>
       {error && <div className="fd-error">{error}</div>}
       <button className="action-btn" disabled={!file || !password || busy} onClick={submit}>
         {busy ? '⏳ Reading…' : 'Import'}
       </button>
-      <p className="fd-hint">The Detailed CAS from CAMS or KFintech. Read once, never stored.</p>
+      <p className="fd-hint">Read once, never stored: not the PDF, not the password.</p>
     </div>
   );
 }
@@ -214,7 +243,12 @@ export default function FundsModal({ onClose, onChanged }) {
   const [error, setError] = useState('');
 
   useEffect(() => {
-    send('GET', '/funds').then(r => setFunds(r.funds)).catch(e => setError(e.message));
+    send('GET', '/funds')
+      .then(r => {
+        setFunds(r.funds);
+        if (!r.funds.length) setMode('import');   // nothing yet: straight to the steps
+      })
+      .catch(e => setError(e.message));
   }, []);
 
   const changed = (message, list) => {
@@ -225,6 +259,7 @@ export default function FundsModal({ onClose, onChanged }) {
 
   const held = (funds || []).filter(f => f.units > 0);
   const total = held.reduce((sum, f) => sum + (f.value || 0), 0);
+  const firstTime = funds !== null && funds.length === 0;
 
   return (
     <div className="modal-backdrop" onClick={onClose}>
@@ -232,26 +267,36 @@ export default function FundsModal({ onClose, onChanged }) {
         <div className="modal-header">
           <div className="modal-title">Mutual funds</div>
           {held.length > 0 && <span className="fd-total">{fmt(Math.round(total))}</span>}
+          <button className="fd-close" onClick={onClose} aria-label="Close">✕</button>
         </div>
-        <div className="modal-body">
-          <div className="fd-tabs">
-            <button className={mode === 'import' ? 'on' : ''} onClick={() => setMode(m => (m === 'import' ? null : 'import'))}>📄 Import statement</button>
-            <button className={mode === 'add' ? 'on' : ''} onClick={() => setMode(m => (m === 'add' ? null : 'add'))}>＋ Add a fund</button>
-          </div>
-          {mode === 'import' && <ImportStatement onDone={changed} />}
-          {mode === 'add' && <AddByHand onDone={changed} />}
-          {note && <div className="fd-note" onClick={() => setNote('')}>✓ {note}</div>}
-          {error && <div className="fd-error">{error}</div>}
-
-          {funds === null && !error && <div className="fd-hint">Loading…</div>}
-          {funds && funds.length === 0 && !mode && (
-            <div className="fd-empty">Import your CAS to bring in every fund at once, or add them one by one. They update daily at AMFI's NAV.</div>
-          )}
-          {funds && funds.length > 0 && (
-            <div className="fd-list">
-              {funds.map(f => <FundRow key={f.code} fund={f} onChanged={changed} />)}
+        {/* Phone: one column. Wide screens: actions on the left, the funds on the right. */}
+        <div className={`modal-body fd-body ${mode ? 'panel-open' : ''}`}>
+          <div className="fd-side">
+            <div className="fd-tabs">
+              <button className={mode === 'import' ? 'on' : ''} onClick={() => setMode(m => (m === 'import' ? null : 'import'))}>📄 Import statement</button>
+              <button className={mode === 'add' ? 'on' : ''} onClick={() => setMode(m => (m === 'add' ? null : 'add'))}>＋ Add a fund</button>
             </div>
-          )}
+            {mode === 'import' && <ImportStatement onDone={changed} firstTime={firstTime} />}
+            {mode === 'add' && <AddByHand onDone={changed} />}
+            {note && <div className="fd-note" onClick={() => setNote('')}>✓ {note}</div>}
+            {error && <div className="fd-error">{error}</div>}
+          </div>
+
+          <div className="fd-main">
+            {funds === null && !error && <div className="fd-hint">Loading…</div>}
+            {firstTime && (
+              <div className="fd-empty">
+                <div className="fd-empty-icon">📄</div>
+                Import your CAS to bring in every fund at once, or add them one by one.
+                <br />They update daily at AMFI's NAV.
+              </div>
+            )}
+            {funds && funds.length > 0 && (
+              <div className="fd-list">
+                {funds.map(f => <FundRow key={f.code} fund={f} onChanged={changed} />)}
+              </div>
+            )}
+          </div>
         </div>
       </div>
     </div>

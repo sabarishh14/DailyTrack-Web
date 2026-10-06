@@ -201,6 +201,13 @@ def folio_ref(folio):
     return hashlib.sha256(str(folio).encode()).hexdigest()[:16]
 
 
+def folio_tail(folio):
+    """The last 4 of the folio number itself: CAMS writes "12345678 / 0", and
+    the " / 0" is a check digit, not the number."""
+    main = str(folio).split("/")[0]
+    return re.sub(r"[^0-9A-Za-z]", "", main)[-4:] or None
+
+
 # ---- SIPs ----
 
 def next_instalment(sip, after):
@@ -438,7 +445,7 @@ def import_statement(cas, today):
                "period": {"from": str(_as_date(cas["statement_period"]["from"])), "to": str(period_to)}}
 
     for folio in cas.get("folios") or []:
-        ref, tail = folio_ref(folio["folio"]), str(folio["folio"])[-4:]
+        ref, tail = folio_ref(folio["folio"]), folio_tail(folio["folio"])
         for s in folio.get("schemes") or []:
             scheme = scheme_for(s.get("amfi"), s.get("isin"))
             if scheme is None:
@@ -518,12 +525,12 @@ def funds_overview():
     for f in Fund.query.order_by(Fund.name).all():
         row = grouped.setdefault(f.amfi_code, {
             "code": f.amfi_code, "name": f.name, "amc": f.amc, "units": 0.0, "invested": 0.0,
-            "folios": [], "sources": set(), "sips": [],
+            "folios": [], "sold_folios": [], "sources": set(), "sips": [],
         })
         row["units"] += f.units or 0
         row["invested"] += float(f.invested or 0)
         if f.folio_tail:
-            row["folios"].append(f.folio_tail)
+            row["folios" if (f.units or 0) > 0 else "sold_folios"].append(f.folio_tail)
         row["sources"].add(f.source)
         row["sips"] += [{"id": s.id, "amount": float(s.amount), "day": s.day, "next": s.next_date.isoformat()}
                         for s in sips.get(f.id, [])]
@@ -531,8 +538,11 @@ def funds_overview():
     for row in grouped.values():
         scheme = navs.get(row["code"])
         nav = scheme["nav"] if scheme else None
+        # A fund still held shows the folios holding it; a sold one, where it was.
+        sold_folios = row.pop("sold_folios")
         out.append({
             **row,
+            "folios": row["folios"] or sold_folios,
             "units": round(row["units"], 3),
             "invested": round(row["invested"], 2),
             "sources": sorted(row["sources"]),

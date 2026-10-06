@@ -8,11 +8,12 @@ import SabDekho from '../pages/SabDekho';
 import { API } from '../constants';
 import { getToken } from '../utils';
 import CustomSelect from './CustomSelect';
+import RdFields from './RdFields';
 
 export default function AddManualAssetModal({ onClose, onAdd }) {
   const today = new Date().toISOString().split('T')[0];
   const [form, setForm] = useState({
-    category: 'FD', name: '', invested_value: '', current_value: '',
+    category: 'FD', name: '', invested_value: '', current_value: '', installment: '',
     interest_rate: '', start_date: '', maturity_date: '',
     is_recurring: false, amount_to_add: '', interval_value: 1, interval_unit: 'months', next_run_date: today
   });
@@ -22,7 +23,12 @@ export default function AddManualAssetModal({ onClose, onAdd }) {
   const isLedgerOrMarket = ['EPF', 'PPF', 'NPS', 'SGB', 'RSU', 'RealEstate', 'Cash'].includes(form.category);
   const isMath = ['FD', 'RD'].includes(form.category);
 
+  const isRd = form.category === 'RD';
+
   const submit = async () => {
+    if (isRd && (!form.installment || !form.start_date)) {
+      return alert("Enter the monthly instalment and the first instalment's date.");
+    }
     if (form.is_recurring && (!form.amount_to_add || !form.next_run_date)) {
       return alert("Please fill in the recurring amount and next date.");
     }
@@ -61,7 +67,7 @@ export default function AddManualAssetModal({ onClose, onAdd }) {
                   is_recurring: becomingMath ? false : form.is_recurring
                 });
               }}
-              options={['FD', 'EPF', 'PPF', 'NPS', 'SGB', 'RSU', 'RealEstate', 'Cash'].map(c => ({ label: c, value: c }))}
+              options={['FD', 'RD', 'EPF', 'PPF', 'NPS', 'SGB', 'RSU', 'RealEstate', 'Cash'].map(c => ({ label: c, value: c }))}
               placeholder="Select Category" width="100%"
             />
           </div>
@@ -71,6 +77,8 @@ export default function AddManualAssetModal({ onClose, onAdd }) {
             <input className="inp" placeholder="e.g., Gold, PPF" value={form.name} onChange={e => setForm({ ...form, name: e.target.value })} />
           </div>
 
+          {/* An RD is its monthly instalment; the rest is worked out. */}
+          {isRd ? <RdFields form={form} setForm={setForm} /> : (
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: '1rem' }}>
             {/* 1. Invested Amount */}
             <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
@@ -97,6 +105,7 @@ export default function AddManualAssetModal({ onClose, onAdd }) {
               )}
             </div>
           </div>
+          )}
 
           {/* 3. Interest Rate Row */}
           <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
@@ -112,18 +121,19 @@ export default function AddManualAssetModal({ onClose, onAdd }) {
 
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: '1rem' }}>
             <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
-              <label style={{ fontSize: '0.75rem', color: 'var(--text2)', fontWeight: 600 }}>Start Date</label>
+              <label style={{ fontSize: '0.75rem', color: 'var(--text2)', fontWeight: 600 }}>{isRd ? 'First instalment' : 'Start Date'}</label>
               <input className="inp" type="date" value={form.start_date} onChange={e => setForm({ ...form, start_date: e.target.value })} style={{ color: form.start_date ? 'var(--text)' : 'var(--text3)' }} />
-              <span style={{ fontSize: '0.65rem', color: 'var(--text3)', lineHeight: '1.2' }}>Needed for auto-compound.</span>
+              <span style={{ fontSize: '0.65rem', color: 'var(--text3)', lineHeight: '1.2' }}>{isRd ? 'Then every month on that day.' : 'Needed for auto-compound.'}</span>
             </div>
             <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
-              <label style={{ fontSize: '0.75rem', color: 'var(--text2)', fontWeight: 600 }}>Maturity Date</label>
+              <label style={{ fontSize: '0.75rem', color: 'var(--text2)', fontWeight: 600 }}>{isRd ? 'Maturity' : 'Maturity Date'}</label>
               <input className="inp" type="date" value={form.maturity_date} onChange={e => setForm({ ...form, maturity_date: e.target.value })} style={{ color: form.maturity_date ? 'var(--text)' : 'var(--text3)' }} />
               <span style={{ fontSize: '0.65rem', color: 'var(--text3)', lineHeight: '1.2' }}>When compounding stops.</span>
             </div>
           </div>
 
-          {/* Automate Toggle */}
+          {/* Automate Toggle (an RD adds its own instalments) */}
+          {!isRd && (
           <div style={{ display: 'flex', alignItems: 'center', gap: '0.85rem', marginTop: '0.5rem', background: 'var(--bg3)', padding: '1rem', borderRadius: '8px', border: '1px solid var(--border)', opacity: isMath ? 0.4 : 1 }}>
             <div
               onClick={() => !isMath && setForm({ ...form, is_recurring: !form.is_recurring })}
@@ -150,6 +160,8 @@ export default function AddManualAssetModal({ onClose, onAdd }) {
               )}
             </div>
           </div>
+
+          )}
 
           {/* New Flexbox Recurring Section */}
           {form.is_recurring && !isMath && (

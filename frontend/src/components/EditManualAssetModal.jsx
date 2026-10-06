@@ -8,10 +8,12 @@ import SabDekho from '../pages/SabDekho';
 import { API } from '../constants';
 import { getToken } from '../utils';
 import CustomSelect from './CustomSelect';
+import RdFields from './RdFields';
 
 export default function EditManualAssetModal({ asset, onClose, onRefresh }) {
   const [form, setForm] = useState({
     ...asset,
+    installment: asset.installment ?? '',
     is_recurring: asset.is_recurring || false,
     amount_to_add: asset.amount_to_add || '',
     interval_value: asset.interval_value || 1,
@@ -24,7 +26,12 @@ export default function EditManualAssetModal({ asset, onClose, onRefresh }) {
   const isLedgerOrMarket = ['EPF', 'PPF', 'NPS', 'SGB', 'RSU', 'RealEstate', 'Cash'].includes(form.category);
   const isMath = ['FD', 'RD'].includes(form.category);
 
+  const isRd = form.category === 'RD';
+
   const submit = async () => {
+    if (isRd && (!form.installment || !form.start_date)) {
+      return alert("Enter the monthly instalment and the first instalment's date.");
+    }
     if (form.is_recurring && (!form.amount_to_add || !form.next_run_date)) {
       return alert("Please fill in the recurring amount and next date.");
     }
@@ -34,8 +41,9 @@ export default function EditManualAssetModal({ asset, onClose, onRefresh }) {
         method: "PUT", headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${getToken()}` },
         body: JSON.stringify(form)
       });
-      if (res.ok) { onRefresh(); onClose(); }
-      else alert("Failed to update asset");
+      const result = await res.json().catch(() => ({}));
+      if (res.ok && result.success !== false) { onRefresh(); onClose(); }
+      else alert(result.message || "Failed to update asset");
     } catch (e) { alert("Network error: " + e.message); }
     finally { setLoading(false); }
   };
@@ -57,12 +65,14 @@ export default function EditManualAssetModal({ asset, onClose, onRefresh }) {
                 is_recurring: becomingMath ? false : form.is_recurring
               });
             }}
-            options={['FD', 'EPF', 'PPF', 'NPS', 'SGB', 'RSU', 'RealEstate', 'Cash'].map(c => ({ label: c, value: c }))}
+            options={['FD', 'RD', 'EPF', 'PPF', 'NPS', 'SGB', 'RSU', 'RealEstate', 'Cash'].map(c => ({ label: c, value: c }))}
             placeholder="Select Category" width="100%"
           />
 
           <input className="inp" placeholder="Asset Name" value={form.name} onChange={e => setForm({ ...form, name: e.target.value })} />
 
+          {/* An RD is its monthly instalment; the rest is worked out. */}
+          {isRd ? <RdFields form={form} setForm={setForm} /> : (
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem' }}>
             {/* 1. Invested Amount */}
             <input className="inp" type="number" placeholder="Invested Amount" value={form.invested_value} onChange={e => setForm({ ...form, invested_value: e.target.value })} />
@@ -85,6 +95,7 @@ export default function EditManualAssetModal({ asset, onClose, onRefresh }) {
               )}
             </div>
           </div>
+          )}
 
           {/* 3. Interest Rate Row */}
           <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
@@ -100,15 +111,17 @@ export default function EditManualAssetModal({ asset, onClose, onRefresh }) {
 
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem' }}>
             <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
-              <span style={{ fontSize: '0.75rem', color: 'var(--text2)', fontWeight: 600 }}>Start Date</span>
+              <span style={{ fontSize: '0.75rem', color: 'var(--text2)', fontWeight: 600 }}>{isRd ? 'First instalment' : 'Start Date'}</span>
               <input className="inp" type="date" value={form.start_date} onChange={e => setForm({ ...form, start_date: e.target.value })} />
             </div>
             <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
-              <span style={{ fontSize: '0.75rem', color: 'var(--text2)', fontWeight: 600 }}>Maturity Date</span>
+              <span style={{ fontSize: '0.75rem', color: 'var(--text2)', fontWeight: 600 }}>{isRd ? 'Maturity' : 'Maturity Date'}</span>
               <input className="inp" type="date" value={form.maturity_date} onChange={e => setForm({ ...form, maturity_date: e.target.value })} />
             </div>
           </div>
 
+          {/* Automate toggle (an RD adds its own instalments) */}
+          {!isRd && (
           <div style={{ display: 'flex', alignItems: 'center', gap: '0.85rem', marginTop: '0.5rem', background: 'var(--bg3)', padding: '1rem', borderRadius: '8px', border: '1px solid var(--border)', opacity: isMath ? 0.4 : 1 }}>
             <div onClick={() => !isMath && setForm({ ...form, is_recurring: !form.is_recurring })} style={{ width: '44px', height: '24px', borderRadius: '12px', background: form.is_recurring ? 'var(--pos)' : 'var(--border2)', position: 'relative', cursor: isMath ? 'not-allowed' : 'pointer', transition: 'background 0.2s', flexShrink: 0 }}>
               <div style={{ width: '18px', height: '18px', borderRadius: '50%', background: '#fff', position: 'absolute', top: '3px', left: form.is_recurring ? '23px' : '3px', transition: 'left 0.2s cubic-bezier(0.4, 0, 0.2, 1)' }} />
@@ -121,6 +134,8 @@ export default function EditManualAssetModal({ asset, onClose, onRefresh }) {
               )}
             </div>
           </div>
+
+          )}
 
           {/* New Flexbox Recurring Section */}
           {form.is_recurring && !isMath && (

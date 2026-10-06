@@ -95,6 +95,8 @@ with app.app_context():
     try:
         db.session.execute(text("ALTER TABLE accounts ADD COLUMN IF NOT EXISTS min_balance NUMERIC(14,2)"))
         db.session.execute(text("ALTER TABLE accounts ADD COLUMN IF NOT EXISTS monthly_budget NUMERIC(14,2)"))
+        # A recurring deposit's monthly instalment (manual assets, category RD).
+        db.session.execute(text("ALTER TABLE manual_assets ADD COLUMN IF NOT EXISTS installment DOUBLE PRECISION"))
         db.session.commit()
         # New tables only (balance_adjustments, device_tokens, routines, routine_checkins);
         # existing ones are left alone.

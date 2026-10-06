@@ -10514,9 +10514,23 @@ input[type="date"]::-webkit-calendar-picker-indicator {
 
 /* ── Mutual funds (components/FundsModal.jsx) ───────────────────────────── */
 .fd-modal { max-width: 560px; width: 100%; }
-.fd-modal .modal-header { display: flex; align-items: center; justify-content: space-between; gap: 1rem; }
-.fd-total { font-family: 'Syne', sans-serif; font-weight: 700; font-size: 1.1rem; color: var(--accent-text); }
-.fd-modal .modal-body { display: flex; flex-direction: column; gap: 0.85rem; }
+.fd-modal .modal-header { display: flex; align-items: center; gap: 0.75rem; }
+.fd-total { margin-left: auto; font-family: 'Syne', sans-serif; font-weight: 700; font-size: 1.1rem; color: var(--accent-text); }
+.fd-close { margin-left: auto; background: none; border: none; color: var(--text3); font-size: 1rem; cursor: pointer; padding: 0.25rem 0.4rem; border-radius: 8px; }
+.fd-total + .fd-close { margin-left: 0; }
+.fd-close:hover { background: var(--bg3); color: var(--text); }
+.fd-body { display: flex; flex-direction: column; gap: 0.85rem; }
+.fd-side, .fd-main { display: flex; flex-direction: column; gap: 0.85rem; min-width: 0; }
+.fd-body.panel-open .fd-empty { display: none; }
+
+/* Wide screens: actions on the left, the funds beside them; phones keep one column. */
+@media (min-width: 900px) {
+  .fd-modal { max-width: 980px; }
+  .fd-body { display: grid; grid-template-columns: 380px minmax(0, 1fr); align-items: start; gap: 1.25rem; }
+  .fd-side { position: sticky; top: 0; }
+  .fd-body.panel-open .fd-empty { display: block; }
+  .fd-main { max-height: calc(85vh - 7rem); overflow-y: auto; padding-right: 0.25rem; }
+}
 .fd-tabs { display: grid; grid-template-columns: 1fr 1fr; gap: 0.5rem; }
 .fd-tabs button {
   padding: 0.7rem; border-radius: 12px; border: 1px solid var(--border); background: var(--bg3);
@@ -10538,7 +10552,22 @@ input[type="date"]::-webkit-calendar-picker-indicator {
 .fd-hint { margin: 0; font-size: 0.75rem; color: var(--text2); }
 .fd-error { font-size: 0.8rem; color: var(--neg); }
 .fd-note { padding: 0.6rem 0.8rem; border-radius: 10px; background: rgba(52, 211, 153, 0.1); color: var(--pos); font-size: 0.85rem; cursor: pointer; }
-.fd-empty { padding: 1.2rem 0.4rem; text-align: center; color: var(--text3); font-size: 0.85rem; line-height: 1.5; }
+.fd-empty { padding: 2rem 1rem; text-align: center; color: var(--text3); font-size: 0.85rem; line-height: 1.6;
+  border: 1.5px dashed var(--border); border-radius: 14px; }
+.fd-empty-icon { font-size: 1.8rem; margin-bottom: 0.4rem; }
+.fd-password { position: relative; }
+.fd-password .inp { padding-right: 2.6rem; }
+.fd-eye { position: absolute; right: 0.35rem; top: 50%; transform: translateY(-50%); background: none; border: none;
+  cursor: pointer; font-size: 1rem; padding: 0.3rem 0.4rem; border-radius: 8px; line-height: 1; }
+.fd-eye:hover { background: var(--card2); }
+.fd-howto { border-radius: 12px; background: var(--bg3); border: 1px solid var(--border); padding: 0.55rem 0.8rem; font-size: 0.82rem; }
+.fd-howto summary { cursor: pointer; font-weight: 600; color: var(--accent-text); list-style: none; }
+.fd-howto summary::-webkit-details-marker { display: none; }
+.fd-howto summary::before { content: '▸ '; }
+.fd-howto[open] summary::before { content: '▾ '; }
+.fd-howto ol { margin: 0.55rem 0 0.2rem; padding-left: 1.2rem; display: flex; flex-direction: column; gap: 0.35rem; color: var(--text3); line-height: 1.45; }
+.fd-howto b { color: var(--text); }
+.fd-howto a { color: var(--accent-text); }
 .fd-results { display: flex; flex-direction: column; border-radius: 12px; border: 1px solid var(--border); overflow: hidden; }
 .fd-result { display: flex; justify-content: space-between; align-items: center; gap: 0.75rem; padding: 0.6rem 0.8rem; background: var(--bg3);
   border: none; border-bottom: 1px solid var(--border); color: var(--text); font: inherit; font-size: 0.85rem; text-align: left; cursor: pointer; }
@@ -10567,3 +10596,8 @@ input[type="date"]::-webkit-calendar-picker-indicator {
 .fd-link { background: none; border: none; color: var(--accent-text); font: inherit; font-size: 0.78rem; font-weight: 600; cursor: pointer; padding: 0.2rem 0.3rem; }
 .fd-link.danger { color: var(--text2); margin-left: auto; }
 .fd-link.danger:hover { color: var(--neg); }
+
+/* RD terms preview (components/RdFields.jsx) */
+.rd-preview { display: flex; flex-wrap: wrap; gap: 0.35rem 1rem; margin-top: 0.35rem; padding: 0.55rem 0.75rem;
+  border-radius: 10px; background: rgba(var(--accent-rgb), 0.08); font-size: 0.78rem; color: var(--text3); }
+.rd-preview b { color: var(--text); font-family: 'Syne', sans-serif; }

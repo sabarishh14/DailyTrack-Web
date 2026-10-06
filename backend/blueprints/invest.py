@@ -20,6 +20,60 @@ from pyxirr import xirr
 
 invest_bp = Blueprint("invest", __name__)
 
+
+def recurring_deposit(installment, rate, start, maturity, today):
+    """(deposited, worth) of a recurring deposit on `today`: one instalment a
+    month from `start`, the last a month before maturity, each compounding
+    quarterly from its own day, the way Indian banks work out RDs."""
+    end = min(today, maturity) if maturity else today
+    deposited = worth = 0.0
+    for k in range(1200):   # a hundred years of months, at most
+        due = start + relativedelta(months=k)
+        if due > end or (maturity and due >= maturity):
+            break
+        years = (end - due).days / 365.25
+        deposited += installment
+        worth += installment * (1 + (rate or 0) / 400) ** (4 * years)
+    return round(deposited, 2), round(worth, 2)
+
+
+def refresh_recurring_deposits(today):
+    """Brings every RD up to `today`; how many changed."""
+    changed = 0
+    for rd in ManualAsset.query.filter(ManualAsset.category == 'RD', ManualAsset.installment.isnot(None),
+                                       ManualAsset.start_date.isnot(None)).all():
+        deposited, worth = recurring_deposit(rd.installment, rd.interest_rate, rd.start_date, rd.maturity_date, today)
+        if (deposited, worth) != (round(rd.invested_value or 0, 2), round(rd.current_value or 0, 2)):
+            rd.invested_value, rd.current_value, rd.last_updated = deposited, worth, today
+            changed += 1
+    return changed
+
+
+def _amount_or_zero(value):
+    """A typed amount; a blank box (an RD hides these) is zero, not an error."""
+    try:
+        return float(value) if value not in (None, '') else 0.0
+    except (TypeError, ValueError):
+        return 0.0
+
+
+def _rd_fields(data, asset):
+    """Sets an RD's instalment and works out its values; an error message if it can't."""
+    try:
+        installment = float(data.get('installment') or 0)
+    except (TypeError, ValueError):
+        installment = 0
+    if installment <= 0:
+        return "Enter the monthly instalment"
+    if not asset.start_date:
+        return "Enter the date of the first instalment"
+    asset.installment = installment
+    asset.invested_value, asset.current_value = recurring_deposit(
+        installment, asset.interest_rate, asset.start_date, asset.maturity_date,
+        datetime.now(pytz.timezone('Asia/Kolkata')).date())
+    return None
+
+
 @invest_bp.route('/api/cron/process-recurring', methods=['POST'])
 @require_access("invest")
 def process_recurring():
@@ -30,8 +84,10 @@ def process_recurring():
     today = datetime.now(pytz.timezone('Asia/Kolkata')).date()
     processed = 0
 
-    # 1. AUTO-COMPOUND FDs & ASSETS (Quarterly Compounding)
-    assets_to_update = ManualAsset.query.filter(ManualAsset.interest_rate.isnot(None), ManualAsset.start_date.isnot(None)).all()
+    # 1. AUTO-COMPOUND FDs & ASSETS (Quarterly Compounding). RDs compound per
+    # instalment instead (refresh_recurring_deposits).
+    assets_to_update = ManualAsset.query.filter(ManualAsset.interest_rate.isnot(None), ManualAsset.start_date.isnot(None),
+                                                ManualAsset.category != 'RD').all()
     for asset in assets_to_update:
         # Stop compounding if it has passed maturity
         end_date = min(today, asset.maturity_date) if asset.maturity_date else today
@@ -72,10 +128,13 @@ def process_recurring():
             
             processed += 1
 
+    # 3. RECURRING DEPOSITS: this month's instalment, and interest on each
+    processed += refresh_recurring_deposits(today)
+
     if processed > 0:
         update_latest_portfolio_snapshot()
         db.session.commit()
-        
+
     return jsonify({"success": True, "processed": processed})
 @invest_bp.route('/api/investments/xirr', methods=['GET'])
 @require_access("invest")
@@ -116,8 +175,11 @@ def get_portfolio_xirr():
 @invest_bp.route('/api/investments', methods=['GET'])
 @require_access("invest")
 def get_investments():
-    # The first look each day values funds held outside Kite and adds due SIPs.
+    # The first look each day values funds held outside Kite and adds due SIPs,
+    # and brings RDs up to date: the phone never calls the cron above.
     funds_service.refresh_if_due()
+    if refresh_recurring_deposits(datetime.now(pytz.timezone('Asia/Kolkata')).date()):
+        update_latest_portfolio_snapshot()
     records = PortfolioSnapshot.query.order_by(PortfolioSnapshot.date.desc()).all()
 
     result = [
@@ -253,6 +315,7 @@ def handle_manual_assets():
             "start_date": a.start_date.strftime("%Y-%m-%d") if a.start_date else None,
             "maturity_date": a.maturity_date.strftime("%Y-%m-%d") if a.maturity_date else None,
             "last_updated": a.last_updated.strftime("%Y-%m-%d"),
+            "installment": a.installment,
             "is_recurring": a.name in task_map,
             "amount_to_add": task_map[a.name].amount_to_add if a.name in task_map else None,
             "interval_value": task_map[a.name].interval_value if a.name in task_map else None,
@@ -267,23 +330,28 @@ def handle_manual_assets():
         start_date = datetime.strptime(data['start_date'], '%Y-%m-%d').date() if data.get('start_date') else None
         mat_date = datetime.strptime(data['maturity_date'], '%Y-%m-%d').date() if data.get('maturity_date') else None
     
-        curr_val_raw = data.get('current_value')
-        curr_val = float(curr_val_raw) if curr_val_raw else float(data.get('invested_value', 0))
+        invested = _amount_or_zero(data.get('invested_value'))
+        curr_val = _amount_or_zero(data.get('current_value')) or invested
 
         new_asset = ManualAsset(
             id=int(datetime.now().timestamp() * 1000),
             category=data['category'],
             name=data['name'],
-            invested_value=float(data.get('invested_value', 0)),
+            invested_value=invested,
             current_value=curr_val,
             interest_rate=float(data.get('interest_rate')) if data.get('interest_rate') else None,
             start_date=start_date,
             maturity_date=mat_date,
             last_updated=datetime.now(ist_timezone).date()
         )
+        if new_asset.category == 'RD':
+            error = _rd_fields(data, new_asset)
+            if error:
+                return jsonify({"success": False, "message": error}), 400
         db.session.add(new_asset)
-        
-        if data.get('is_recurring'):
+
+        # An RD adds its own instalments; the generic automation is for the rest.
+        if data.get('is_recurring') and new_asset.category != 'RD':
             new_task = RecurringTask(
                 id=int(datetime.now().timestamp() * 1000) + 1,
                 asset_name=data['name'],
@@ -312,17 +380,24 @@ def edit_manual_asset(aid):
         
         asset.category = data['category']
         asset.name = data['name']
-        asset.invested_value = float(data.get('invested_value', 0))
-        asset.current_value = float(data.get('current_value', 0))
+        asset.invested_value = _amount_or_zero(data.get('invested_value'))
+        asset.current_value = _amount_or_zero(data.get('current_value'))
         asset.interest_rate = float(data.get('interest_rate')) if data.get('interest_rate') else None
         asset.start_date = datetime.strptime(data['start_date'], '%Y-%m-%d').date() if data.get('start_date') else None
         asset.maturity_date = datetime.strptime(data['maturity_date'], '%Y-%m-%d').date() if data.get('maturity_date') else None
         asset.last_updated = datetime.now(ist_timezone).date()
+        if asset.category == 'RD':
+            error = _rd_fields(data, asset)
+            if error:
+                db.session.rollback()
+                return jsonify({"success": False, "message": error}), 400
+        else:
+            asset.installment = None
 
         # Handle Recurring Task updates linked to this asset
         task = RecurringTask.query.filter_by(asset_name=old_name).first()
-        
-        if data.get('is_recurring'):
+
+        if data.get('is_recurring') and asset.category != 'RD':
             if task:
                 task.asset_name = asset.name
                 task.amount_to_add = float(data['amount_to_add'])
