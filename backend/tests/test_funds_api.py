@@ -22,7 +22,7 @@ import funds_service  # noqa: E402
 from blueprints.funds import funds_bp  # noqa: E402
 from blueprints.invest import invest_bp  # noqa: E402
 from extensions import db  # noqa: E402
-from models import EquityHolding, Fund, FundSip, FundTransaction, MutualFundHolding  # noqa: E402
+from models import EquityHolding, Fund, FundSip, FundTransaction, MutualFundHolding, PortfolioSnapshot  # noqa: E402
 
 OWNER, FRIEND = setup.OWNER, people.FRIEND
 TODAY = funds_service.ist_today()
@@ -186,6 +186,16 @@ class FundsApiTest(ApiCase):
         self.assertEqual((result["added"], result["skipped_kite"]), ([], ["Parag Parikh Flexi Cap Fund"]))
         self.assertEqual(self.call("POST", "/api/funds", OWNER, {"code": "122639", "amount": 500}).status_code, 409)
         self.assertEqual(self.rows(Fund), [])
+
+    def test_an_import_that_adds_nothing_leaves_the_days_totals_to_kite(self):
+        synced = TODAY - timedelta(days=2)
+        self.kite_synced(OWNER, synced)
+        with self.app.app_context():
+            for i, day in enumerate((synced, TODAY)):   # today's: copied over by an earlier import
+                db.session.add(PortfolioSnapshot(id=10 + i, owner_email=OWNER, date=day, grand_total_curr=3110))
+            db.session.commit()
+        self.imported(statement(), who=OWNER)
+        self.assertEqual([s["date"] for s in self.ok("GET", "/api/investments", OWNER)], [synced.isoformat()])
 
     def test_a_wrong_password_says_so(self):
         def refuse(stream, password):

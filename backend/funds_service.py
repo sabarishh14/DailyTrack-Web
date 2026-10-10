@@ -299,6 +299,14 @@ def recompute_snapshot(day):
     manual = ManualAsset.query.all()
 
     snap = PortfolioSnapshot.query.filter_by(date=day).first()
+    # A day gets totals of its own only when something was valued that day: a
+    # Kite sync, or funds held outside it. Otherwise Kite's last day stands, so
+    # an import that adds nothing doesn't copy its totals onto today (and one
+    # made that way, or for funds since removed, goes).
+    if kite_day is not None and kite_day != day and not own_funds:
+        if snap is not None and day == ist_today():
+            db.session.delete(snap)
+        return None
     if snap is None:
         if not (equity or kite_funds or own_funds or manual):
             return None
