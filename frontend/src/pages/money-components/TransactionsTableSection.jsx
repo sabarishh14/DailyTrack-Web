@@ -88,10 +88,13 @@ export default function TransactionsTableSection({
   const [compact, setCompact] = useState(() => {
     try { return localStorage.getItem('dt_tx_compact') === '1'; } catch { return false; }
   });
-  const toggleCompact = () => setCompact(v => {
-    try { localStorage.setItem('dt_tx_compact', v ? '0' : '1'); } catch { /* per-browser nicety only */ }
-    return !v;
-  });
+  const toggleCompact = () => {
+    const next = !compact;
+    try { localStorage.setItem('dt_tx_compact', next ? '1' : '0'); } catch { /* per-browser nicety only */ }
+    setCompact(next);
+    // The page size goes with the density (10, or 25 compact) unless you picked another.
+    if (rowsPerPage === (compact ? 25 : 10)) { setRowsPerPage(next ? 25 : 10); setCurrentPage(0); }
+  };
   // The balance column sits right after Amount; its cell comes last in the
   // markup (see .with-bal in index.css) so the phone card layout is untouched.
   // Compact rows have less padding, so their columns shrink with them.

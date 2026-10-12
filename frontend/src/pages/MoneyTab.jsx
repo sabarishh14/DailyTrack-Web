@@ -90,7 +90,10 @@ const currentMonthLabel = new Date().toLocaleString('default', { month: 'long' }
 
   // Pagination
   const [currentPage, setCurrentPage] = useState(0);
-  const [rowsPerPage, setRowsPerPage] = useState(10);
+  // Compact rows fit more on screen, so they start at 25 a page (TransactionsTableSection).
+  const [rowsPerPage, setRowsPerPage] = useState(() => {
+    try { return localStorage.getItem('dt_tx_compact') === '1' ? 25 : 10; } catch { return 10; }
+  });
 
   const [actionMenuTx, setActionMenuTx] = useState(null);
   useEffect(() => {
