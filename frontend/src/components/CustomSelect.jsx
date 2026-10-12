@@ -4,6 +4,7 @@ import { PieChart, Pie, Cell, Tooltip, ResponsiveContainer, LineChart, Line, XAx
 import { initializeApp } from 'firebase/app';
 import { getAuth, signInWithPopup, GoogleAuthProvider, signOut } from 'firebase/auth';
 import SabDekho from '../pages/SabDekho';
+import { searchRank } from '../utils/search';
 
 
 export default function CustomSelect({ value, onChange, options, icon, placeholder, width = 'auto', minWidth = '120px' }) {
@@ -69,10 +70,7 @@ export default function CustomSelect({ value, onChange, options, icon, placehold
     setIsOpen(!isOpen);
   };
 
-  const filtered = options.filter(o => {
-    const label = typeof o === 'object' ? o.label : o;
-    return String(label).toLowerCase().includes(searchTerm.toLowerCase());
-  });
+  const filtered = searchRank(options, searchTerm, o => (typeof o === 'object' ? o.label : o));
 
   const displayValue = options.find(o => (typeof o === 'object' ? o.value : o) === value);
   const displayLabel = displayValue ? (typeof displayValue === 'object' ? displayValue.label : displayValue) : placeholder;

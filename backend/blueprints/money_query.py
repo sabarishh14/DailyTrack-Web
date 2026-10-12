@@ -17,14 +17,15 @@ row must be included.
      "headings":  {...},
      "visibility":{...},   # "Active" / "Excluded"
      "date_from": "YYYY-MM-DD", "date_to": "YYYY-MM-DD",
-     "description": "substring", "search": "free text"}
+     "description": "free text", "search": "free text"}   # smart search, see _text_match
 """
 from datetime import datetime, date
 
 import requests
-from flask import Blueprint, request, jsonify
-from sqlalchemy import func, extract, or_, case, literal, String, cast, text as sql_text
+from flask import Blueprint, g, request, jsonify
+from sqlalchemy import func, extract, and_, or_, case, literal, String, cast, text as sql_text
 
+import smart_search
 from extensions import db, SHEETS_URL
 from models import Transaction, Split, Account, BalanceAdjustment
 from access import require_access, current_access, owner_only
@@ -87,16 +88,44 @@ def apply_filters(query, f):
         date_to = _parse_date(f.get("date_to")) or date_from
         query = query.filter(Transaction.date >= date_from, Transaction.date <= date_to)
 
-    if f.get("description"):
-        query = query.filter(Transaction.description.ilike(f"%{f['description']}%"))
-    if f.get("search"):
-        term = f"%{f['search']}%"
-        query = query.filter(or_(
-            Transaction.description.ilike(term),
-            Transaction.heading.ilike(term),
-            cast(Transaction.amount, String).ilike(term),
-        ))
+    for text in (f.get("description"), f.get("search")):
+        if text and smart_search.words(text):
+            query = query.filter(_text_match(text))
     return query
+
+
+def _vocabulary():
+    """The words in the person's descriptions, categories and accounts, and
+    each description run together (for "supermoney" against "super.money").
+    Once per request: the table's rows and totals filter alike."""
+    if "smart_vocab" not in g:
+        values = [v for column in (Transaction.description, Transaction.heading, Transaction.account)
+                  for (v,) in _scoped(column).distinct() if v]
+        g.smart_vocab = ({w for v in values for w in smart_search.words(v)},
+                         [smart_search.normalize(v).replace(" ", "") for v in values])
+    return g.smart_vocab
+
+
+def _text_match(text):
+    """Every word of `text` in the description, category, account or amount
+    (smart_search.py has the rules)."""
+    fields = (Transaction.description, Transaction.heading, Transaction.account)
+    run_together = func.lower(func.coalesce(Transaction.description, ""))
+    for ch in " .-_/'&":
+        run_together = func.replace(run_together, ch, "")
+    conditions = []
+    for word in smart_search.words(text):
+        options = [word]
+        if smart_search.typo_limit(word):
+            vocab, joined = _vocabulary()
+            if not any(word in v for v in vocab) and not any(word in j for j in joined):
+                options += smart_search.near(word, vocab)[:10]
+        matches = [field.ilike(f"%{o}%") for o in options for field in fields]
+        matches += [run_together.like(f"%{o}%") for o in options]
+        if word.isdigit():
+            matches.append(cast(Transaction.amount, String).like(f"%{word}%"))
+        conditions.append(or_(*matches))
+    return and_(*conditions)
 
 
 def _scoped(*columns):

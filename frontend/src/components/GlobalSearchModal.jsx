@@ -8,6 +8,7 @@ import SabDekho from '../pages/SabDekho';
 import { TABS, API } from '../constants';
 import { getToken } from '../utils';
 import { apiPost } from '../api/money';
+import { searchMatches } from '../utils/search';
 
 const GlobalSearchModal = ({ isOpen, onClose, onNavigate, onEditTx, onAction, getToken, enableNagapandi, tabs = TABS, canSearchMoney = false, canToggleBalances = false }) => {
   const [query, setQuery] = useState('');
@@ -45,13 +46,13 @@ const GlobalSearchModal = ({ isOpen, onClose, onNavigate, onEditTx, onAction, ge
 
   const q = query.toLowerCase();
 
-  const navMatches = tabs.filter(t => t.label.toLowerCase().includes(q) || t.id.toString() === q)
+  const navMatches = tabs.filter(t => searchMatches(t.label, q) || t.id.toString() === q)
     .map(t => ({ type: 'NAV', id: `nav-${t.id}`, label: `Go to ${t.label}`, action: () => onNavigate(t.id), icon: t.icon }));
 
   const quickActions = [
     { type: 'ACTION', id: 'act-1', label: 'Toggle Theme', action: () => onAction('theme'), icon: '🎨' },
     ...(canToggleBalances ? [{ type: 'ACTION', id: 'act-2', label: 'Toggle Balances Visibility', action: () => onAction('balances'), icon: '👁️' }] : []),
-  ].filter(a => a.label.toLowerCase().includes(q));
+  ].filter(a => searchMatches(a.label, q));
 
   const txMatches = q ? txResults.map(t => ({
     type: 'TX', id: `tx-${t.id}`,

@@ -4,6 +4,7 @@ import { PieChart, Pie, Cell, Tooltip, ResponsiveContainer, LineChart, Line, XAx
 import { initializeApp } from 'firebase/app';
 import { getAuth, signInWithPopup, GoogleAuthProvider, signOut } from 'firebase/auth';
 import SabDekho from '../pages/SabDekho';
+import { searchRank } from '../utils/search';
 
 
 export default function MultiAssetSelect({ selectedAssets, setSelectedAssets, options, placeholder }) {
@@ -66,7 +67,7 @@ export default function MultiAssetSelect({ selectedAssets, setSelectedAssets, op
     setIsOpen(!isOpen);
   };
 
-  const filtered = options.filter(o => o.toLowerCase().includes(searchTerm.toLowerCase()));
+  const filtered = searchRank(options, searchTerm);
 
   return (
     <div style={{ position: 'relative', width: '100%' }} ref={containerRef}>

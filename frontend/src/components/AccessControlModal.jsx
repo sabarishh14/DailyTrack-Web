@@ -2,6 +2,7 @@ import { useState, useEffect, useMemo, useCallback } from "react";
 
 import { API } from '../constants';
 import { getToken } from '../utils';
+import { searchRank } from '../utils/search';
 
 // Admin-only: who can sign in. Everyone who can has their own, separate data,
 // so there's nothing to share here. Rules live in ACCESS_CONTROL.md and are
@@ -173,8 +174,7 @@ export default function AccessControlModal({ onClose, currentEmail }) {
   };
 
   const visibleUsers = useMemo(() => {
-    const q = query.trim().toLowerCase();
-    return q ? users.filter(u => u.email.toLowerCase().includes(q)) : users;
+    return searchRank(users, query, u => u.email);
   }, [users, query]);
 
   const isSelf = draft && currentEmail && draft.email.toLowerCase() === currentEmail.toLowerCase();

@@ -1,6 +1,7 @@
 import { useState, useMemo, useEffect } from "react";
 import { API } from '../constants';
 import { getToken, fmt } from '../utils';
+import { searchRank } from '../utils/search';
 
 export default function BudgetManagerModal({ allHeadings, budgets, onClose, onRefresh }) {
   const [search, setSearch] = useState("");
@@ -76,8 +77,7 @@ export default function BudgetManagerModal({ allHeadings, budgets, onClose, onRe
 
   // Filter by search, sort categories with active budgets to top, then alphabetical
   const displayHeadings = useMemo(() => {
-    return allHeadings
-      .filter(h => h.toLowerCase().includes(search.toLowerCase()))
+    return searchRank(allHeadings, search)
       .sort((a, b) => {
         const aHasBudget = localBudgets[a] > 0;
         const bHasBudget = localBudgets[b] > 0;

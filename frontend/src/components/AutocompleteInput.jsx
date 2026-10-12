@@ -4,6 +4,7 @@ import { PieChart, Pie, Cell, Tooltip, ResponsiveContainer, LineChart, Line, XAx
 import { initializeApp } from 'firebase/app';
 import { getAuth, signInWithPopup, GoogleAuthProvider, signOut } from 'firebase/auth';
 import SabDekho from '../pages/SabDekho';
+import { searchRank } from '../utils/search';
 
 
 export default function AutocompleteInput({ value, onChange, options, placeholder, className, onBlur }) {
@@ -24,7 +25,7 @@ export default function AutocompleteInput({ value, onChange, options, placeholde
   const handleType = (e) => {
     const val = e.target.value;
     onChange(val);
-    setFiltered(options.filter(o => o.toLowerCase().includes(val.toLowerCase())));
+    setFiltered(searchRank(options, val));
     setShow(true);
     setActiveIndex(-1);
   };
@@ -55,10 +56,7 @@ export default function AutocompleteInput({ value, onChange, options, placeholde
         type="text" className={`bulk-inp${className ? ' ' + className : ''}`} placeholder={placeholder}
         value={value} onChange={handleType} onKeyDown={handleKeyDown}
         onFocus={() => {
-          const lowerVal = value.toLowerCase();
-          const startsWith = options.filter(o => o.toLowerCase().startsWith(lowerVal));
-          const contains = options.filter(o => o.toLowerCase().includes(lowerVal) && !o.toLowerCase().startsWith(lowerVal));
-          setFiltered([...startsWith, ...contains]);
+          setFiltered(searchRank(options, value));
           setShow(true);
         }}
         onBlur={() => {

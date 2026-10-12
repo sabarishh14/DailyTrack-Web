@@ -9,6 +9,7 @@ import ReconciliationModal from '../components/ReconciliationModal';
 import BudgetManagerModal from '../components/BudgetManagerModal';
 import CategoryExclusionModal from '../components/CategoryExclusionModal';
 import AddAccountModal from './settings-components/AddAccountModal';
+import { searchRank } from '../utils/search';
 
 // Everything you can set on the web, in one place. [keywords] feed the search box.
 const SECTIONS = [
@@ -69,9 +70,7 @@ export default function SettingsPage(props) {
   const [toast, setToast] = useState('');
   const sections = useMemo(() => SECTIONS.filter(s => s.show(access)), [access]);
   const shown = useMemo(() => {
-    const q = query.trim().toLowerCase();
-    if (!q) return sections;
-    return sections.filter(s => `${s.title} ${s.desc} ${s.keywords}`.toLowerCase().includes(q));
+    return searchRank(sections, query, s => `${s.title} ${s.desc} ${s.keywords}`);
   }, [sections, query]);
   const [active, setActive] = useState(null);
   const rootRef = useRef(null);

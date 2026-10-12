@@ -7,6 +7,7 @@ import SabDekho from '../pages/SabDekho';
 
 import { API } from '../constants';
 import { getToken } from '../utils';
+import { searchRank } from '../utils/search';
 
 export default function CategoryExclusionModal({ excludedHeadings = [], allHeadings, onClose, onRefresh }) {
   const [loadingCat, setLoadingCat] = useState(null);
@@ -22,8 +23,7 @@ export default function CategoryExclusionModal({ excludedHeadings = [], allHeadi
 
   // 2. Filter by search, then sort (Excluded items at the top, then Alphabetical)
   const displayHeadings = useMemo(() => {
-    return allHeadings
-      .filter(h => h.toLowerCase().includes(search.toLowerCase()))
+    return searchRank(allHeadings, search)
       .sort((a, b) => {
         if (exclusionMap[a] && !exclusionMap[b]) return -1; // 'a' is excluded, move up
         if (!exclusionMap[a] && exclusionMap[b]) return 1;  // 'b' is excluded, move up

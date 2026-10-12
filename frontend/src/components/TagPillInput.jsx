@@ -7,6 +7,7 @@ import SabDekho from '../pages/SabDekho';
 
 import { API } from '../constants';
 import { getToken } from '../utils';
+import { searchRank } from '../utils/search';
 
 export default function TagPillInput({ value, onChange }) {
   const [inputVal, setInputVal] = useState('');
@@ -44,7 +45,7 @@ export default function TagPillInput({ value, onChange }) {
     } else {
       setInputVal(val);
       if (val.trim()) {
-        const filtered = allTags.filter(t => t.toLowerCase().includes(val.toLowerCase()) && !tags.includes(t));
+        const filtered = searchRank(allTags, val).filter(t => !tags.includes(t));
         setSuggestions(filtered);
         setIsOpen(filtered.length > 0);
       } else {

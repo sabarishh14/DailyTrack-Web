@@ -350,7 +350,7 @@ export default function TransactionsTableSection({
         </div>
         <input
           className="inp"
-          placeholder="🔍 Description"
+          placeholder="🔍 Search"
           value={filterDesc}
           onChange={e => setFilterDesc(e.target.value)}
           style={{ fontSize: '0.8rem', width: '200px', padding: '0.45rem 0.75rem', borderRadius: '999px' }}

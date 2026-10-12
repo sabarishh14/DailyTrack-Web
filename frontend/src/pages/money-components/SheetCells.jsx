@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { useAccountOptions } from '../../api/money';
 import { evaluateMath, getBankEmoji } from '../../utils';
+import { searchRank } from '../../utils/search';
 
 // Spreadsheet-style cells for the transactions table: they look like the
 // table's own text until focused, and open the app's dropdown list.
@@ -132,10 +133,7 @@ export function SheetSuggest({ value, onChange, options, placeholder, label, inp
   const setRefs = (el) => { ref.current = el; if (inputRef) inputRef.current = el; };
 
   const matches = useMemo(() => {
-    const q = value.trim().toLowerCase();
-    const starts = options.filter(o => o.toLowerCase().startsWith(q));
-    const contains = options.filter(o => !o.toLowerCase().startsWith(q) && o.toLowerCase().includes(q));
-    return [...starts, ...contains].filter(o => o !== value).slice(0, 8);
+    return searchRank(options, value).filter(o => o !== value).slice(0, 8);
   }, [value, options]);
 
   const show = () => { setStyle(listPosition(ref.current)); setOpen(true); setActive(-1); };

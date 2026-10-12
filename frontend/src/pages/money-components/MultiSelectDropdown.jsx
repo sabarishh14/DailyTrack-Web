@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef } from "react";
 import { createPortal } from "react-dom";
+import { searchRank } from '../../utils/search';
 
 // Multi-select dropdown component (3-State Logic: neutral -> included -> excluded -> neutral)
 export default function MultiSelectDropdown({ label, icon, options, filterState, setFilterState, dropdownKey, openDropdown, setOpenDropdown }) {
@@ -31,8 +32,7 @@ export default function MultiSelectDropdown({ label, icon, options, filterState,
     }
   }, [openDropdown, dropdownKey]);
 
-  const filteredOptions = options
-    .filter(opt => String(opt).toLowerCase().includes(searchTerm.toLowerCase()))
+  const filteredOptions = searchRank(options, searchTerm, String)
     .sort((a, b) => {
       const aSelected = included.has(a) || excluded.has(a);
       const bSelected = included.has(b) || excluded.has(b);
