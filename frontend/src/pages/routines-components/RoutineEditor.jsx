@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react';
 import { Modal } from './RoutineParts';
-import { addDays, createRoutine, deleteRoutine, fillPast, parseDay, updateRoutine, weekday, dayMonth } from './routines';
+import { addDays, createRoutine, deleteRoutine, fillPast, parseDay, repeatText, updateRoutine, weekday, dayMonth } from './routines';
 
 // The phone's editor (RoutineEditorScreen.kt), on the web. Reminders stay on the
 // phone: they're notifications it schedules itself.
@@ -25,9 +25,12 @@ const EMOJIS = [
 
 const SCHEDULES = [
   ['daily', 'Every day'], ['days', 'Some days'], ['weekly', 'Times a week'],
-  ['monthly', 'Times a month'], ['interval', 'Chore'],
+  ['monthly', 'Times a month'], ['repeat', 'Repeats'], ['interval', 'Chore'],
 ];
 const UNITS = [['day', 'days'], ['week', 'weeks'], ['month', 'months']];
+const REPEAT_UNITS = [...UNITS, ['year', 'years']];
+// Chores (counted from when they're done) are kept only for ones that already are.
+const COUNTED_EVERY = ['interval', 'repeat'];
 const CHALLENGE_LENGTHS = [7, 14, 21, 30, 60, 90];
 const DAY_LETTERS = ['M', 'T', 'W', 'T', 'F', 'S', 'S'];
 const DAY_NAMES = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
@@ -70,7 +73,10 @@ function formFromRoutine(r, today) {
   };
 }
 
-const canBeChallenge = (f) => f.schedule !== 'interval';
+const canBeChallenge = (f) => !COUNTED_EVERY.includes(f.schedule);
+const mondayIndex = (iso) => (parseDay(iso).getDay() + 6) % 7;
+/** The first day on or after `from` that's weekday i (Mon = 0). */
+const nextWeekday = (from, i) => addDays(from, (i - mondayIndex(from) + 7) % 7);
 const challengeEnd = (f) => addDays(f.startDate, f.challengeDays - 1);
 
 function toRequest(f) {
@@ -81,8 +87,8 @@ function toRequest(f) {
     schedule: f.schedule,
     days: f.schedule === 'days' ? f.days : null,
     target: f.schedule === 'weekly' ? f.weeklyTarget : f.schedule === 'monthly' ? f.monthlyTarget : null,
-    every: f.schedule === 'interval' ? f.every : null,
-    unit: f.schedule === 'interval' ? f.unit : null,
+    every: COUNTED_EVERY.includes(f.schedule) ? f.every : null,
+    unit: COUNTED_EVERY.includes(f.schedule) ? f.unit : null,
     start_date: f.startDate,
     end_date: f.isChallenge && canBeChallenge(f) ? challengeEnd(f) : '',
   };
@@ -284,9 +290,8 @@ export default function RoutineEditor({ routine, today, onClose, onDone, onChang
 
         <Field label="How often">
           <div className="rt-pills">
-            {/* Chores are on hold for new routines; one that's already a chore stays editable. */}
-            {SCHEDULES.filter(([schedule]) => schedule !== 'interval' || form.schedule === 'interval').map(([schedule, label]) => (
-              <Pill key={schedule} selected={form.schedule === schedule} onClick={() => update({ schedule })}>{label}</Pill>
+            {SCHEDULES.filter(([schedule]) => schedule !== 'interval' || initial.schedule === 'interval').map(([schedule, label]) => (
+              <Pill key={schedule} selected={form.schedule === schedule} onClick={() => update({ schedule, ...(schedule === 'interval' && form.unit === 'year' ? { unit: 'month' } : {}) })}>{label}</Pill>
             ))}
           </div>
           <div className="rt-schedule">
@@ -340,6 +345,39 @@ export default function RoutineEditor({ routine, today, onClose, onDone, onChang
                 <p className="rt-hint">Shows up when it's due and stays until it's done. The next one is counted from the day you do it.</p>
               </>
             )}
+            {form.schedule === 'repeat' && (
+              <>
+                <div className="rt-interval">
+                  <span className="rt-stepper-suffix">Every</span>
+                  <Stepper value={form.every} min={1} max={365} onChange={v => update({ every: v })} />
+                  <div className="rt-pills">
+                    {REPEAT_UNITS.map(([unit, label]) => (
+                      <Pill key={unit} selected={form.unit === unit} onClick={() => update({ unit })}>
+                        {form.every === 1 ? label.slice(0, -1) : label}
+                      </Pill>
+                    ))}
+                  </div>
+                </div>
+                {form.unit === 'week' && (
+                  <div className="rt-daypicker">
+                    {DAY_LETTERS.map((letter, i) => (
+                      <button
+                        type="button" key={i} title={DAY_NAMES[i]}
+                        className={mondayIndex(form.startDate) === i ? 'on' : ''}
+                        onClick={() => update({ startDate: nextWeekday(today, i) })}
+                      >{letter}</button>
+                    ))}
+                  </div>
+                )}
+                <label className="rt-date-row">
+                  <span>First one</span>
+                  <input type="date" className="rt-input" value={form.startDate} onChange={e => update({ startDate: e.target.value })} />
+                </label>
+                {form.startDate && (
+                  <p className="rt-hint"><b>{repeatText(form.every, form.unit, form.startDate)}.</b> Due on the day, stays till done. Missed if the next one comes first.</p>
+                )}
+              </>
+            )}
           </div>
         </Field>
 
@@ -366,7 +404,7 @@ export default function RoutineEditor({ routine, today, onClose, onDone, onChang
           </Field>
         )}
 
-        {form.schedule !== 'interval' && (
+        {!COUNTED_EVERY.includes(form.schedule) && (
           <Field label="Starts">
             <label className="rt-date-row">
               <span>First day</span>

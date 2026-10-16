@@ -93,6 +93,25 @@ export const longDate = (iso, today) => {
 
 export const weekday = (iso) => WEEKDAYS[parseDay(iso).getDay()];
 
+const ordinal = (n) => `${n}${n % 100 >= 11 && n % 100 <= 13 ? 'th' : ({ 1: 'st', 2: 'nd', 3: 'rd' })[n % 10] || 'th'}`;
+
+/** "Every Monday", "Every 2 months on the 5th", "Every year on 2 Jan", as the server words it. */
+export function repeatText(every, unit, first) {
+  if (unit === 'week') {
+    const name = weekday(first);
+    return every === 1 ? `Every ${name}` : `Every ${every} weeks on ${name}`;
+  }
+  if (unit === 'month') {
+    const on = `on the ${ordinal(parseDay(first).getDate())}`;
+    return every === 1 ? `Monthly ${on}` : `Every ${every} months ${on}`;
+  }
+  if (unit === 'year') {
+    const on = `on ${dayMonth(first)}`;
+    return every === 1 ? `Every year ${on}` : `Every ${every} years ${on}`;
+  }
+  return every === 1 ? 'Every day' : `Every ${every} days`;
+}
+
 /** "Yesterday", or "Sat 27". */
 export const shortDate = (iso, today) =>
   (iso === addDays(today, -1) ? 'Yesterday' : `${WEEKDAYS[parseDay(iso).getDay()].slice(0, 3)} ${parseDay(iso).getDate()}`);

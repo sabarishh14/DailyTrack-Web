@@ -14,6 +14,10 @@ serves the web page and Nagapandi, so they report the same numbers.
   - Chores (every N days/weeks/months): due from the due date until done, and on
     time if done by then. A skip on the deadline moves it a day. The next one
     falls due N after it was done.
+  - Repeats (every N days/weeks/months/years on the calendar: every Monday, every
+    2nd month on the 5th, every year on 2 Jan): each date is due until done, on
+    time if done by then, like a chore. Not done by the next date, it's missed
+    and the next one takes over, so they never pile up.
   - Days before a routine was added count only once filled in: a blank one isn't
     a miss, and a week or chore deadline that passed before then isn't a failure.
   - Archived routines are left out of everything.
@@ -74,6 +78,31 @@ class Routine:
         if self.unit == "month":
             return day + relativedelta(months=count)
         return day + timedelta(days=count)
+
+    def occurrence(self, k):
+        """A "repeat" routine's k-th date (0 is the first), counted from the start,
+        so one on the 31st is on the 31st in every month that has one."""
+        n = max(self.every or 1, 1) * k
+        if self.unit == "year":
+            return self.start_date + relativedelta(years=n)
+        if self.unit == "month":
+            return self.start_date + relativedelta(months=n)
+        return self.start_date + timedelta(days=n * (7 if self.unit == "week" else 1))
+
+    def occurrence_index(self, day):
+        """The last occurrence on or before [day]; -1 before the first."""
+        if day < self.start_date:
+            return -1
+        every = max(self.every or 1, 1)
+        if self.unit not in ("month", "year"):
+            return (day - self.start_date).days // (every * (7 if self.unit == "week" else 1))
+        months = (day.year - self.start_date.year) * 12 + day.month - self.start_date.month
+        k = max(months // (every * (12 if self.unit == "year" else 1)), 0)
+        while k > 0 and self.occurrence(k) > day:
+            k -= 1
+        while self.occurrence(k + 1) <= day:
+            k += 1
+        return k
 
 
 @dataclass(frozen=True)
@@ -167,6 +196,7 @@ class RoutineEngine:
         for c in checkins:
             self._by.setdefault(c.routine_id, {})[c.date] = c
         self._cycles = {}
+        self._done = {}
 
     def check_in(self, routine_id, day):
         return self._by.get(routine_id, {}).get(day)
@@ -188,7 +218,7 @@ class RoutineEngine:
         return [None if monday + timedelta(days=i) > today else self.day_stats(monday + timedelta(days=i)) for i in range(7)]
 
     def upcoming(self, today):
-        """[(routine, date)]: chores not yet due, and routines that haven't started."""
+        """[(routine, date)]: chores and repeats not yet due, and routines that haven't started."""
         out = []
         for r in self.routines:
             if r.schedule == "interval":
@@ -196,6 +226,10 @@ class RoutineEngine:
                 last = cycles[-1] if cycles else None
                 if last and last.completed is None and last.due > today:
                     out.append((r, last.due))
+            elif r.schedule == "repeat":
+                due = self.next_due(r, today)
+                if due and due > today:
+                    out.append((r, due))
             elif r.start_date > today:
                 out.append((r, r.start_date))
         return sorted(out, key=lambda pair: pair[1])
@@ -249,7 +283,7 @@ class RoutineEngine:
                             successes += progress.needed
                     period = self._period_of(r, period[1] + timedelta(days=1))
             else:
-                for cycle in self._cycles_of(r):
+                for cycle in self._judged_cycles(r, last):
                     judged = self._judge(r, cycle, today)
                     if judged and start <= judged[0] <= last:
                         chances += 1
@@ -285,7 +319,7 @@ class RoutineEngine:
                         run = 0
                 period = self._period_of(routine, period[1] + timedelta(days=1))
             return Streak(run, best, "week" if routine.schedule == "weekly" else "month")
-        for cycle in self._cycles_of(routine):
+        for cycle in self._judged_cycles(routine, last):
             judged = self._judge(routine, cycle, today)
             if judged is None:
                 continue
@@ -322,7 +356,19 @@ class RoutineEngine:
         dates = [c.date for c in self._by.get(routine.id, {}).values() if c.status == DONE]
         return max(dates) if dates else None
 
-    def next_due(self, routine):
+    def next_due(self, routine, today=None):
+        """A chore's or repeat's open due date (even if overdue), else its next one."""
+        if routine.schedule == "repeat":
+            if today is None:
+                return None
+            done = self._repeat_done(routine)
+            k = routine.occurrence_index(today)
+            if k < 0 or k in done:
+                k += 1
+                while k in done:   # done early
+                    k += 1
+            due = routine.occurrence(k)
+            return due if routine.end_date is None or due <= routine.end_date else None
         if routine.schedule != "interval":
             return None
         cycles = self._cycles_of(routine)
@@ -350,6 +396,14 @@ class RoutineEngine:
                 return None
             return DayItem(routine, day, status, note, required=False,
                            progress=self._progress(routine, self._period_of(routine, day)))
+        if routine.schedule == "repeat":
+            done = self._repeat_done(routine)
+            k = routine.occurrence_index(day) if routine.active_on(day) else -1
+            if k >= 0 and (done.get(k) is None or done[k] >= day):
+                return DayItem(routine, day, status, note, required=True, due_date=routine.occurrence(k))
+            if done.get(k + 1) == day:   # done early, for the next one
+                return DayItem(routine, day, status, note, required=False, due_date=routine.occurrence(k + 1))
+            return None
         for cycle in self._cycles_of(routine):
             if (cycle.due <= day and (cycle.completed is None or cycle.completed >= day)) or cycle.completed == day:
                 return DayItem(routine, day, status, note, required=cycle.due <= day, due_date=cycle.due)
@@ -442,6 +496,38 @@ class RoutineEngine:
             due = routine.after_interval(completed)
         self._cycles[routine.id] = cycles
         return cycles
+
+    def _judged_cycles(self, routine, last):
+        """A chore's cycles, or a repeat's up to [last] (its end, if sooner)."""
+        if routine.schedule != "repeat":
+            return self._cycles_of(routine)
+        stop = min(last, routine.end_date or last)
+        return [self._repeat_cycle(routine, k) for k in range(routine.occurrence_index(stop) + 1)]
+
+    def _repeat_cycle(self, routine, k):
+        """A repeat's k-th time: due on its date, its deadline no later than the
+        day before the next one's (or the routine's end)."""
+        due = routine.occurrence(k)
+        closes = routine.occurrence(k + 1) - timedelta(days=1)
+        if routine.end_date is not None:
+            closes = min(closes, routine.end_date)
+        return _Cycle(due, min(self._deadline_for(routine, due), closes), self._repeat_done(routine).get(k))
+
+    def _repeat_done(self, routine):
+        """{k: the day it was done} for a repeat. A "done" completes the date it
+        falls under, or, when that one's already done, the next one, early."""
+        if routine.id not in self._done:
+            done = {}
+            for d in sorted(c.date for c in self._by.get(routine.id, {}).values() if c.status == DONE):
+                if routine.end_date is not None and d > routine.end_date:
+                    continue
+                k = routine.occurrence_index(d)
+                if k >= 0 and k not in done:
+                    done[k] = d
+                elif k + 1 not in done and (routine.end_date is None or routine.occurrence(k + 1) <= routine.end_date):
+                    done[k + 1] = d
+            self._done[routine.id] = done
+        return self._done[routine.id]
 
     def _deadline_for(self, routine, due):
         deadline, guard = due, 0

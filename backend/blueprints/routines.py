@@ -26,8 +26,8 @@ routines_bp = Blueprint("routines", __name__)
 IST = pytz.timezone("Asia/Kolkata")
 
 KINDS = ("build", "avoid")
-SCHEDULES = ("daily", "days", "weekly", "monthly", "interval")
-UNITS = ("day", "week", "month")
+SCHEDULES = ("daily", "days", "weekly", "monthly", "interval", "repeat")
+UNITS = {"interval": ("day", "week", "month"), "repeat": ("day", "week", "month", "year")}
 FILL_IN_WINDOW = 30  # days back the page asks to fill in: as far as the score looks
 STATUSES = ("done", "missed", "skipped")
 TARGET_LIMITS = {"weekly": 7, "monthly": 31}
@@ -148,10 +148,10 @@ def _apply_fields(routine, data, creating):
         routine.target = target
     else:
         routine.target = None
-    if schedule == "interval":
+    if schedule in UNITS:
         every = _int_in(data.get("every", routine.every), 1, 365)
         unit = data.get("unit", routine.unit)
-        if every is None or unit not in UNITS:
+        if every is None or unit not in UNITS[schedule]:
             return "Say how often it repeats"
         routine.every, routine.unit = every, unit
     else:
@@ -374,8 +374,28 @@ def _schedule_text(r):
         return _weekdays(r.days)
     if r.schedule in ("weekly", "monthly"):
         return f"{r.target or 1}× a {'week' if r.schedule == 'weekly' else 'month'}"
+    if r.schedule == "repeat":
+        return _repeat_text(r.every or 1, r.unit or "day", r.start_date)
     every, word = r.every or 1, r.unit or "day"
     return f"Every {word}" if every == 1 else f"Every {every} {word}s"
+
+
+def _ordinal(n):
+    return f"{n}{'th' if 11 <= n % 100 <= 13 else {1: 'st', 2: 'nd', 3: 'rd'}.get(n % 10, 'th')}"
+
+
+def _repeat_text(every, unit, first):
+    """"Every Monday", "Every 2 months on the 5th", "Every year on 2 Jan"."""
+    if unit == "week":
+        name = first.strftime("%A")
+        return f"Every {name}" if every == 1 else f"Every {every} weeks on {name}"
+    if unit == "month":
+        on = f"on the {_ordinal(first.day)}"
+        return f"Monthly {on}" if every == 1 else f"Every {every} months {on}"
+    if unit == "year":
+        on = f"on {_day_month(first)}"
+        return f"Every year {on}" if every == 1 else f"Every {every} years {on}"
+    return "Every day" if every == 1 else f"Every {every} days"
 
 
 def _due_in(d, today):
@@ -413,7 +433,7 @@ def _item_line(item, streak):
         p = item.progress
         if p:
             parts.append(f"Done for this {p.unit}" if p.met and p.needed > 0 else f"{p.done} of {p.needed} this {p.unit}")
-    elif r.schedule == "interval":
+    elif r.schedule in ("interval", "repeat"):
         if item.due_date:
             late = (item.date - item.due_date).days
             if item.status == rules.DONE and late <= 0:
@@ -490,7 +510,7 @@ def build_summary(owner, today, month):
         entry = {**_routine_dict(row), "schedule_text": _schedule_text(row)}
         r = active.get(row.id)
         if r is not None:
-            next_due = engine.next_due(r)
+            next_due = engine.next_due(r, today)
             blank = engine.unanswered_past_days(r, today)
             entry.update({
                 "past_blank": {"count": len(blank), "since": _iso(blank[0]) if blank else None},
@@ -606,7 +626,7 @@ def routine_detail(routine_id):
         return jsonify({"success": False, "message": "Routine not found"}), 404
     answers = engine.answers_for(r)
     current = engine.item_on(r, today)
-    next_due = engine.next_due(r)
+    next_due = engine.next_due(r, today)
     days = []
     for d in _month_days(month, today):
         item = engine.item_on(r, d)
@@ -667,7 +687,8 @@ def chat_context(owner, today):
         f"Today is {today:%A} {_day_month(today)} {today.year} (India time).",
         "How it's scored: done counts, missed counts against, skipped is excused. A past day left "
         "unanswered counts as missed. Times-per-week/month routines are judged per week or month, "
-        "with partial credit. Chores are on time when done by their due date.",
+        "with partial credit. Chores and repeats (fixed dates) are on time when done by their due date; "
+        "a repeat not done before its next date counts as missed.",
         f"Today: {s.done} of {s.total} done, {s.missed} missed, {s.skipped} skipped, {s.unanswered} not answered yet.",
         f"Consistency over the last 30 days, all routines: {_percent(engine.consistency(today))} "
         f"(the 30 days before that: {_percent(engine.previous_consistency(today))}). "
@@ -699,7 +720,7 @@ def chat_context(owner, today):
                      f"all time {_percent(engine.all_time(r, today))}")
         counts = {k: sum(1 for c in answers if c.status == k) for k in STATUSES}
         facts.append(f"answered done {counts['done']}×, missed {counts['missed']}×, skipped {counts['skipped']}× in total")
-        last_done, next_due = engine.last_done(r), engine.next_due(r)
+        last_done, next_due = engine.last_done(r), engine.next_due(r, today)
         if last_done:
             facts.append(f"last done {_day_month(last_done)} {last_done.year}")
         if next_due:

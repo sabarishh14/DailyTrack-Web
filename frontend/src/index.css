@@ -15,6 +15,7 @@
   --card: #111827;
   --card2: #1a2235;
   --border: rgba(255, 255, 255, 0.07);
+  --border2: rgba(255, 255, 255, 0.12);
   --text: #e2e8f0;
   --text2: #64748b;
   --text3: #94a3b8;
@@ -10516,8 +10517,6 @@ input[type="date"]::-webkit-calendar-picker-indicator {
 /* One column on phones and tablets. From 960px it grows wide instead of tall:
    the funds become a table, and import and add set their halves side by side. */
 .fd-modal { max-width: 600px; }
-/* --border2 is only defined for the light theme; the dark one, for this modal. */
-:root:not([data-theme="light"]) .fd-modal { --border2: rgba(255, 255, 255, 0.12); }
 /* Stays put while a long list scrolls, so Back and Close are always there. The
    modal's own clipping rounds its corners. */
 .fd-header { position: sticky; top: 0; z-index: 2; gap: 0.4rem; justify-content: flex-start; border-radius: 0; }

@@ -155,6 +155,8 @@ class RoutinesApiTest(unittest.TestCase):
             {"name": "A", "schedule": "monthly", "target": 0},
             {"name": "A", "schedule": "interval", "every": 3},
             {"name": "A", "schedule": "interval", "every": 0, "unit": "day"},
+            {"name": "A", "schedule": "interval", "every": 1, "unit": "year"},
+            {"name": "A", "schedule": "repeat", "every": 2},
             {"name": "A", "start_date": "2026-09-30", "end_date": "2026-09-01"},
             {"name": "A", "start_date": "30/09/2026"},
         ]
@@ -162,6 +164,15 @@ class RoutinesApiTest(unittest.TestCase):
             with self.subTest(body=body):
                 self.assertEqual(self.call("POST", "/api/routines", body=body).status_code, 400)
         self.assertEqual(self.listing()["routines"], [])
+
+    def test_repeats_say_when_they_fall(self):
+        cases = [("week", 1, "2026-09-28", "Every Monday"), ("week", 2, "2026-09-28", "Every 2 weeks on Monday"),
+                 ("month", 2, "2026-01-05", "Every 2 months on the 5th"), ("month", 1, "2026-01-31", "Monthly on the 31st"),
+                 ("year", 1, "2027-01-02", "Every year on 2 Jan"), ("day", 3, "2026-09-28", "Every 3 days")]
+        for unit, every, start, text in cases:
+            self.create(name=f"{unit}{every}", schedule="repeat", every=every, unit=unit, start_date=start)
+        shown = {r["name"]: r["schedule_text"] for r in self.summary()["routines"]}
+        self.assertEqual([shown[f"{u}{e}"] for u, e, _, _ in cases], [t for _, _, _, t in cases])
 
     def test_new_routines_go_to_the_end(self):
         orders = [self.create(name=f"R{i}")["sort_order"] for i in range(3)]

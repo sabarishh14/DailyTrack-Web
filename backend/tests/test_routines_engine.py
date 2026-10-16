@@ -12,7 +12,7 @@ from datetime import date, timedelta
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from routines_engine import CheckIn, DONE, MISSED, SKIPPED, Routine, RoutineEngine  # noqa: E402
+from routines_engine import CheckIn, DONE, MISSED, SKIPPED, Routine, RoutineEngine, Score  # noqa: E402
 
 MON = date(2026, 9, 28)
 
@@ -31,6 +31,10 @@ def weekly(rid, target, start=MON, **kw):
 
 def chore(rid, first_due, every=7, unit="day", **kw):
     return Routine(id=rid, name=f"C{rid}", schedule="interval", every=every, unit=unit, start_date=first_due, **kw)
+
+
+def repeat(rid, first, every=1, unit="week", **kw):
+    return Routine(id=rid, name=f"P{rid}", schedule="repeat", every=every, unit=unit, start_date=first, **kw)
 
 
 def at(routine, d, status, note=None):
@@ -265,6 +269,61 @@ class OneRoutineTest(unittest.TestCase):
         self.assertEqual(engine([flt]).next_due(flt), day(2))
         self.assertEqual(engine([flt], at(flt, day(4), DONE)).next_due(flt), day(11))
         self.assertIsNone(engine([daily(2)]).next_due(daily(2)))
+
+
+class RepeatTest(unittest.TestCase):
+    def test_every_monday_is_due_from_monday_until_done(self):
+        r = repeat(1, MON)
+        e = engine([r], at(r, day(2), DONE))     # done on the Wednesday: late
+        due = lambda d: [i.due_date for i in e.day_items(d)]  # noqa: E731
+        self.assertEqual([due(day(n)) for n in range(4)], [[MON], [MON], [MON], []])
+        self.assertEqual(due(day(7)), [day(7)])
+        self.assertEqual(e.next_due(r, day(3)), day(7))
+        self.assertEqual(e.upcoming(day(3)), [(r, day(7))])
+        self.assertEqual(e.score(MON, day(3), day(3)), Score(0, 1))
+
+    def test_one_not_done_before_the_next_is_missed_and_the_next_takes_over(self):
+        r = repeat(1, MON)
+        e = engine([r], at(r, day(7), DONE))
+        self.assertEqual([i.due_date for i in e.day_items(day(6))], [MON])      # Sunday: still last Monday's
+        self.assertEqual([i.due_date for i in e.day_items(day(7))], [day(7)])   # Monday: only the new one
+        self.assertEqual(e.score(MON, day(9), day(9)), Score(1, 2))
+        self.assertEqual((e.streak(r, day(9)).current, e.streak(r, day(9)).unit), (1, "time"))
+
+    def test_a_skip_on_the_day_moves_it_a_day(self):
+        r = repeat(1, MON)
+        e = engine([r], at(r, MON, SKIPPED), at(r, day(1), DONE))
+        self.assertEqual(e.score(MON, day(2), day(2)), Score(1, 1))
+
+    def test_monthly_on_the_31st_keeps_to_each_months_end(self):
+        r = repeat(1, date(2026, 1, 31), unit="month")
+        self.assertEqual([r.occurrence(k) for k in range(4)],
+                         [date(2026, 1, 31), date(2026, 2, 28), date(2026, 3, 31), date(2026, 4, 30)])
+        self.assertEqual([r.occurrence_index(date(2026, 3, d)) for d in (30, 31)], [1, 2])
+        self.assertEqual(r.occurrence_index(date(2026, 1, 30)), -1)
+
+    def test_every_2nd_month_and_every_year(self):
+        r = repeat(1, date(2026, 1, 5), every=2, unit="month")
+        self.assertEqual(engine([r]).next_due(r, date(2026, 2, 10)), date(2026, 1, 5))   # still open
+        done = engine([r], at(r, date(2026, 1, 5), DONE))
+        self.assertEqual(done.next_due(r, date(2026, 2, 10)), date(2026, 3, 5))
+        self.assertEqual(done.day_items(date(2026, 2, 10)), [])
+        y = repeat(2, date(2027, 1, 2), unit="year")
+        self.assertEqual(engine([y]).upcoming(date(2026, 10, 16)), [(y, date(2027, 1, 2))])
+        self.assertEqual(y.occurrence(1), date(2028, 1, 2))
+
+    def test_doing_the_next_one_early_counts_for_it(self):
+        r = repeat(1, MON)
+        e = engine([r], at(r, MON, DONE), at(r, day(6), DONE))     # this Monday's, then next Monday's on Sunday
+        self.assertEqual([i.required for i in e.day_items(day(6))], [False])   # on the list that day, done early
+        self.assertEqual(e.day_items(day(7)), [])
+        self.assertEqual(e.next_due(r, day(7)), day(14))
+        self.assertEqual(e.score(MON, day(7), day(7)), Score(2, 2))
+
+    def test_days_before_it_was_added_arent_failures(self):
+        r = repeat(1, MON, created_on=day(14))
+        e = engine([r])
+        self.assertEqual(e.score(MON, day(14), day(14)), Score(0, 0))
 
 
 if __name__ == "__main__":
