@@ -521,6 +521,7 @@ export default function TransactionsTableSection({
       )}
 
       {/* Transactions List */}
+      <div className={`load-line ${tableRefreshing ? 'on' : ''}`} style={{ marginBottom: '-3px' }} aria-hidden="true" />
       <div
         ref={wrapRef}
         className={`tx-table-wrap ${compact ? 'compact' : ''} ${tableRefreshing ? 'is-refreshing' : ''}`}

@@ -21,6 +21,8 @@ row must be included.
 """
 from datetime import datetime, date
 
+import pytz
+
 import requests
 from flask import Blueprint, g, request, jsonify
 from sqlalchemy import func, extract, and_, or_, case, literal, String, cast, text as sql_text
@@ -34,6 +36,7 @@ from tenancy import data_owner
 
 money_query_bp = Blueprint("money_query", __name__)
 
+IST = pytz.timezone("Asia/Kolkata")
 MONTH_NAMES = ["January", "February", "March", "April", "May", "June", "July",
                "August", "September", "October", "November", "December"]
 MAX_PAGE = 500
@@ -318,14 +321,21 @@ def money_summary():
 @money_query_bp.route('/api/money/analyze', methods=['POST'])
 @require_access("money", level="view")
 def money_analyze():
-    """Spending analyser: pie groups plus income/expense counts for the filters."""
-    f = (request.json or {}).get("filters") or {}
+    """Spending analyser: pie groups plus income/expense counts for the filters.
+    {"group": "account"} groups by account instead of category, with each
+    account's months for its average (_account_months)."""
+    body = request.json or {}
+    f = body.get("filters") or {}
     not_excluded = func.coalesce(Transaction.exclude_analytics, False) == False  # noqa: E712
 
+    by_account = body.get("group") == "account"
     # Exactly one included category → drill down into its descriptions.
-    by_description = len((f.get("headings") or {}).get("include") or []) == 1
+    by_description = not by_account and len((f.get("headings") or {}).get("include") or []) == 1
     desc = func.trim(Transaction.description)
-    key = case((or_(Transaction.description.is_(None), desc == ""), "No Description"), else_=desc) if by_description else Transaction.heading
+    if by_account:
+        key = Transaction.account
+    else:
+        key = case((or_(Transaction.description.is_(None), desc == ""), "No Description"), else_=desc) if by_description else Transaction.heading
 
     groups = (apply_filters(_scoped(key, func.sum(func.abs(Transaction.amount))), f)
               .filter(not_excluded).group_by(key).all())
@@ -339,10 +349,67 @@ def money_analyze():
         "success": True,
         "groups": pie,
         "by_description": by_description,
+        "by_account": by_account,
         "count": sum(s["count"] for s in stats.values()),
         "credit": stats.get("credit", {"count": 0, "sum": 0.0}),
         "debit": stats.get("debit", {"count": 0, "sum": 0.0}),
+        **({"accounts": _account_months(f, not_excluded)} if by_account else {}),
     })
+
+
+HISTORY_MONTHS = 12
+DATE_FILTERS = ("months", "years", "date_from", "date_to")
+
+
+def _add_months(first_of_month, n):
+    y, m = divmod(first_of_month.year * 12 + first_of_month.month - 1 + n, 12)
+    return date(y, m + 1, 1)
+
+
+def _account_months(f, not_excluded, today=None):
+    """Each account's latest month against its usual. The latest month is the last
+    one the filters cover (normally this month); its usual is the average of the
+    12 months before it, from the account's first month there, with a month
+    that had nothing on it counting as 0. The date filters only pick the latest
+    month: the rest (type, category, account) apply throughout."""
+    this_month = (today or datetime.now(IST).date()).replace(day=1)
+    anchor = apply_filters(_scoped(func.max(Transaction.month)), f).filter(not_excluded).scalar()
+    if anchor is None:
+        return {"months": [], "latest": None, "in_progress": False, "rows": []}
+    anchor = anchor.replace(day=1)
+    first = _add_months(anchor, -HISTORY_MONTHS)
+    rest = {k: v for k, v in f.items() if k not in DATE_FILTERS}
+    rows = (apply_filters(_scoped(Transaction.account, Transaction.month, func.sum(func.abs(Transaction.amount))), rest)
+            .filter(not_excluded, Transaction.month >= first, Transaction.month <= anchor)
+            .group_by(Transaction.account, Transaction.month).all())
+    by_account = {}
+    for account, month, total in rows:
+        if account is not None and month is not None:
+            per = by_account.setdefault(account, {})
+            per[month] = per.get(month, 0.0) + float(total or 0)
+    # The filtered period's totals, for each account's share (the donut's).
+    shown = dict(apply_filters(_scoped(Transaction.account, func.sum(func.abs(Transaction.amount))), f)
+                 .filter(not_excluded).group_by(Transaction.account).all())
+    shown_total = sum(float(v or 0) for v in shown.values())
+    before = [_add_months(anchor, -n) for n in range(HISTORY_MONTHS, 0, -1)]
+    trend_months = [_add_months(anchor, -n) for n in range(5, -1, -1)]
+    out = []
+    for account, per in by_account.items():
+        span = [m for m in before if m >= min(per)]
+        average = sum(per.get(m, 0.0) for m in span) / len(span) if span else None
+        latest = per.get(anchor, 0.0)
+        out.append({
+            "account": account,
+            "average": round(average, 2) if average is not None else None,
+            "months": len(span),
+            "latest": round(latest, 2),
+            "change": round((latest - average) / average * 100, 1) if average else None,
+            "share": round(float(shown.get(account) or 0) / shown_total * 100, 1) if shown_total else 0.0,
+            "trend": [round(per.get(m, 0.0), 2) for m in trend_months],
+        })
+    out.sort(key=lambda a: (-a["latest"], -(a["average"] or 0)))
+    return {"months": [m.isoformat() for m in trend_months], "latest": anchor.isoformat(),
+            "in_progress": anchor == this_month, "rows": out}
 
 
 SORTS = {

@@ -108,6 +108,15 @@ with app.app_context():
     except Exception as e:
         db.session.rollback()
         print(f"⚠️ Could not ensure money schema: {e}")
+    try:
+        # Letterboxd reviews stored with HTML codes (It&#039;s) before the sync decoded them.
+        from blueprints.media import repair_letterboxd_reviews
+        repaired = repair_letterboxd_reviews()
+        if repaired:
+            print(f"Decoded {repaired} Letterboxd reviews")
+    except Exception as e:
+        db.session.rollback()
+        print(f"⚠️ Could not repair Letterboxd reviews: {e}")
     finally:
         # gunicorn --preload forks the workers after this ran: they must not
         # inherit this process's open connections, or they'd share sockets.

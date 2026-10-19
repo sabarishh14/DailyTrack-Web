@@ -2435,6 +2435,9 @@ input[type="date"]::-webkit-calendar-picker-indicator {
     gap: 0.75rem;
   }
 
+  /* A grid has no row to divide: the switch and Back just take their cells. */
+  .filter-bar>.an-divider { display: none; }
+
   .filter-bar>div {
     width: 100%;
     min-width: 0;
@@ -10751,3 +10754,66 @@ input[type="date"]::-webkit-calendar-picker-indicator {
 .rd-preview { display: flex; flex-wrap: wrap; gap: 0.35rem 1rem; margin-top: 0.35rem; padding: 0.55rem 0.75rem;
   border-radius: 10px; background: rgba(var(--accent-rgb), 0.08); font-size: 0.78rem; color: var(--text3); }
 .rd-preview b { color: var(--text); font-family: 'Syne', sans-serif; }
+
+/* ── Analyser by account (pages/money-components/AccountAverages.jsx) ─── */
+.acct-avg { margin-top: 1.5rem; padding: 1rem 1.1rem 0.6rem; border-radius: 16px; background: rgba(var(--accent-rgb), 0.04); border: 1px solid rgba(var(--accent-rgb), 0.1); }
+.acct-avg-head { display: flex; align-items: baseline; justify-content: space-between; flex-wrap: wrap; gap: 0.25rem 1rem; margin-bottom: 0.5rem; padding: 0 0.6rem; }
+.acct-avg-head h4 { margin: 0; font-family: 'Syne', sans-serif; font-size: 1rem; font-weight: 700; color: var(--text); }
+.acct-avg-head span { font-size: 0.78rem; color: var(--text2); }
+.acct-avg-row { display: grid; grid-template-columns: minmax(0, 2fr) minmax(0, 1fr) minmax(0, 1fr) 72px 84px; align-items: center; gap: 1rem;
+  width: 100%; padding: 0.7rem 0.6rem; border: none; border-radius: 10px; background: none; color: var(--text); font: inherit; text-align: left; cursor: pointer; transition: background 0.15s; }
+button.acct-avg-row:hover { background: rgba(var(--accent-rgb), 0.08); }
+.acct-avg-labels { cursor: default; padding-top: 0.2rem; padding-bottom: 0.35rem; border-bottom: 1px solid var(--border); border-radius: 0;
+  font-size: 0.68rem; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; color: var(--text3); }
+.acct-avg-labels span:not(:first-child) { text-align: right; }
+.acct-avg-name { display: flex; align-items: center; gap: 0.6rem; min-width: 0; }
+.acct-avg-name i { width: 10px; height: 10px; border-radius: 3px; flex-shrink: 0; }
+.acct-avg-name b { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 0.88rem; font-weight: 600; }
+.acct-avg-name small { flex-shrink: 0; font-size: 0.72rem; font-weight: 600; color: var(--text2); }
+.acct-avg-num { text-align: right; white-space: nowrap; font-family: 'Syne', sans-serif; font-size: 0.88rem; font-weight: 700; font-variant-numeric: tabular-nums; }
+.acct-avg-num em { display: none; }
+.acct-avg-change { text-align: right; font-size: 0.82rem; font-weight: 700; color: var(--text3); }
+.acct-avg-change.bad { color: var(--neg); }
+.acct-avg-change.good { color: var(--pos); }
+.acct-avg-spark { display: flex; justify-content: flex-end; }
+@media (max-width: 640px) {
+  .acct-avg { padding: 0.9rem 0.5rem 0.4rem; }
+  .acct-avg-labels { display: none; }
+  .acct-avg-row { grid-template-columns: auto minmax(0, 1fr) 76px; grid-template-areas: "name name spark" "avg latest change"; gap: 0.3rem 0.75rem; }
+  .acct-avg-row + .acct-avg-row { border-top: 1px solid var(--border); border-radius: 0; }
+  .acct-avg-name { grid-area: name; }
+  .acct-avg-spark { grid-area: spark; }
+  .acct-avg-num.avg { grid-area: avg; }
+  .acct-avg-num.latest { grid-area: latest; }
+  .acct-avg-change { grid-area: change; }
+  .acct-avg-num { text-align: left; font-size: 0.85rem; }
+  .acct-avg-num em { display: inline; margin-right: 0.35rem; font-family: 'DM Sans', sans-serif; font-style: normal; font-size: 0.7rem; font-weight: 600; color: var(--text2); }
+}
+
+/* Analyser: Back out of a drill-down, beside the Category | Account switch */
+.an-back { display: inline-flex; align-items: center; gap: 0.4rem; flex-shrink: 1; min-width: 0; max-width: 340px; padding: 0.42rem 0.9rem 0.42rem 0.7rem;
+  border-radius: 999px; border: 1px solid rgba(var(--accent-rgb), 0.35); background: rgba(var(--accent-rgb), 0.1); color: var(--accent-text);
+  font: inherit; font-size: 0.78rem; font-weight: 700; cursor: pointer; transition: background 0.15s; }
+.an-back:hover { background: rgba(var(--accent-rgb), 0.2); }
+.an-back svg { flex-shrink: 0; }
+.an-crumbs { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; margin-left: 0.2rem; padding-left: 0.55rem;
+  border-left: 1px solid rgba(var(--accent-rgb), 0.3); font-weight: 500; color: var(--text3); }
+.an-crumbs i { margin: 0 0.35rem; font-style: normal; color: var(--text2); }
+.an-crumbs b { color: var(--text); font-weight: 600; }
+.an-divider { align-self: stretch; width: 1px; margin: 0.25rem 0.15rem; background: var(--border2); }
+
+/* Refreshing: a thin line sweeps while new numbers load; the old ones dim. The
+   delay keeps quick loads from flickering. */
+.load-line { position: relative; height: 3px; border-radius: 3px; overflow: hidden; opacity: 0; transition: opacity 0.2s ease; pointer-events: none; }
+.load-line.on { opacity: 1; transition-delay: 0.15s; background: rgba(var(--accent-rgb), 0.15); }
+.load-line::after { content: ''; position: absolute; top: 0; bottom: 0; left: -40%; width: 40%; border-radius: 3px;
+  background: linear-gradient(90deg, transparent, var(--accent), var(--accent3), transparent); animation: load-line 1.1s ease-in-out infinite; }
+@keyframes load-line { from { left: -40%; } to { left: 100%; } }
+.an-body > * { transition: opacity 0.2s ease, filter 0.2s ease; }
+.an-body.is-refreshing > * { opacity: 0.5; filter: saturate(0.6); pointer-events: none; transition-delay: 0.15s; }
+@media (prefers-reduced-motion: reduce) { .load-line::after { animation-duration: 2.4s; } }
+
+/* The analyser's donut, when its slices change set */
+.donut-in { width: 100%; height: 100%; animation: donut-in 0.5s cubic-bezier(0.16, 1, 0.3, 1); }
+@keyframes donut-in { from { opacity: 0; transform: scale(0.92) rotate(-10deg); } to { opacity: 1; transform: none; } }
+@media (prefers-reduced-motion: reduce) { .donut-in { animation-duration: 0.01s; } }

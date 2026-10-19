@@ -438,7 +438,7 @@ function MovieStatsSections({ d, statsYear, openModal, onFilterLibrary }) {
             <span className="stats-section-title">📅 Films by Year</span>
           </div>
           <div className="stats-month-chart"> {/* Reusing month chart CSS for similar bar style */}
-            <div className="stats-month-bars" style={{ overflowX: 'auto', paddingBottom: '8px', justifyContent: d.films_by_year.length > 12 ? 'flex-start' : 'center' }}>
+            <div className="stats-month-bars" style={{ overflowX: 'auto', paddingBottom: '8px' }}>
               {d.films_by_year.map((item, i) => (
                 <div
                   key={item.year}
@@ -468,7 +468,7 @@ function MovieStatsSections({ d, statsYear, openModal, onFilterLibrary }) {
             <span className="stats-section-title">🌐 Films by Language</span>
           </div>
           <div className="stats-month-chart">
-            <div className="stats-month-bars" style={{ overflowX: 'auto', paddingBottom: '8px', justifyContent: d.films_by_language.length > 12 ? 'flex-start' : 'center' }}>
+            <div className="stats-month-bars" style={{ overflowX: 'auto', paddingBottom: '8px' }}>
               {d.films_by_language.map((item) => {
                 const clickable = onFilterLibrary && item.code;
                 return (

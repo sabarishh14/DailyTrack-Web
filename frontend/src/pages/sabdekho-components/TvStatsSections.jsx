@@ -216,7 +216,7 @@ export default function TvStatsSections({ data, statsYear, openModal, onFilterLi
           {statsYear === 'all' && d.episodes_by_year?.length > 0 && (
             <Section icon="📅" title="Episodes by Year">
               <div className="stats-month-chart">
-                <div className="stats-month-bars" style={{ overflowX: 'auto', paddingBottom: '8px', justifyContent: d.episodes_by_year.length > 12 ? 'flex-start' : 'center' }}>
+                <div className="stats-month-bars" style={{ overflowX: 'auto', paddingBottom: '8px' }}>
                   {d.episodes_by_year.map(item => (
                     <div
                       key={item.year}
@@ -243,7 +243,7 @@ export default function TvStatsSections({ data, statsYear, openModal, onFilterLi
           {d.shows_by_language?.length > 0 && (
             <Section icon="🌐" title="Shows by Language">
               <div className="stats-month-chart">
-                <div className="stats-month-bars" style={{ overflowX: 'auto', paddingBottom: '8px', justifyContent: d.shows_by_language.length > 12 ? 'flex-start' : 'center' }}>
+                <div className="stats-month-bars" style={{ overflowX: 'auto', paddingBottom: '8px' }}>
                   {d.shows_by_language.map(item => {
                     const clickable = onFilterLibrary && item.code;
                     return (

@@ -38,6 +38,28 @@ const revokedNotice = async (res) => {
   return 'Your session has expired. Please sign in again.';
 };
 
+// Opening the app pulls in what's new on Letterboxd (its latest few entries),
+// in the background and at most every 15 minutes per browser. SabDekho
+// refreshes if anything came in (dt:letterboxd-synced).
+const LETTERBOXD_QUICK_SYNC_EVERY = 15 * 60 * 1000;
+async function quickLetterboxdSync() {
+  try {
+    if (Date.now() - Number(localStorage.getItem('dt_lbx_quick_sync') || 0) < LETTERBOXD_QUICK_SYNC_EVERY) return;
+    localStorage.setItem('dt_lbx_quick_sync', String(Date.now()));
+  } catch { /* storage blocked: sync anyway */ }
+  try {
+    const r = await fetch(`${API}/movies/sync/rss`, {
+      method: 'POST',
+      headers: { 'Authorization': `Bearer ${getToken()}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ fast: true }),
+    });
+    if (!r.ok) return;
+    const lines = (await r.text()).trim().split('\n');
+    const result = JSON.parse(lines[lines.length - 1] || '{}');
+    if (result.added_movies || result.added_logs) window.dispatchEvent(new Event('dt:letterboxd-synced'));
+  } catch { /* offline, or Letterboxd is down: the next open tries again */ }
+}
+
 export default function App() {
   const [isLoggedIn, setIsLoggedIn] = useState(!!localStorage.getItem('dt_token'));
   const [appLoading, setAppLoading] = useState(!!localStorage.getItem('dt_token'));
@@ -389,6 +411,7 @@ setAccounts([]);
       setSharedWithMe(me.shared_with_me || []);
       setPendingRequests(me.pending_requests || 0);
       if (showLoading) setLbxUsername(me.settings?.letterboxd_username || '');
+      if (me.settings?.letterboxd_username && acl.can('sabdekho', 'edit') && !getViewAs()) quickLetterboxdSync();
 
       if (showLoading) addLog("Connecting to LifeTrack database...");
 

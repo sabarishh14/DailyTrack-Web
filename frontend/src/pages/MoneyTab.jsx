@@ -21,6 +21,7 @@ import TransactionsTableSection from './money-components/TransactionsTableSectio
 import { SectionCardSkeleton } from './money-components/SectionCardSkeleton';
 import { useAccess } from '../access/AccessContext';
 import { apiGet, apiPost, tri, useApi, useMoneyMeta, EMPTY_META, monthKey } from '../api/money';
+import AccountAverages from './money-components/AccountAverages';
 
 function MoneyTab({ accounts, categories, budgets = [], onRefresh, refreshBudgets, globalActionTx, setGlobalActionTx, dataVersion, isActive = true }) {
   const canEdit = useAccess().can('money', 'edit');
@@ -262,11 +263,45 @@ const currentMonthLabel = new Date().toLocaleString('default', { month: 'long' }
     date_from: chartDateFromDebounced || null,
     date_to: chartDateToDebounced || null,
   }), [chartAccounts, chartTypes, chartMonths, chartYears, chartHeadings, chartDateFromDebounced, chartDateToDebounced]);
-  const analyzerKey = `${JSON.stringify(analyzerFilters)}|${dataVersion}`;
-  const analyzerRes = useApi(() => apiPost('/money/analyze', { filters: analyzerFilters }), analyzerKey, hasOpened);
+  // Category or account slices; remembered per browser.
+  const [analyzerGroup, setAnalyzerGroupState] = useState(() => {
+    try { return localStorage.getItem('dt_analyzer_group') === 'account' ? 'account' : 'heading'; } catch { return 'heading'; }
+  });
+  const setAnalyzerGroup = (group) => {
+    setAnalyzerGroupState(group);
+    try { localStorage.setItem('dt_analyzer_group', group); } catch { /* per-browser nicety only */ }
+  };
+  const byAccount = analyzerGroup === 'account';
+  const analyzerKey = `${JSON.stringify(analyzerFilters)}|${analyzerGroup}|${dataVersion}`;
+  const analyzerRes = useApi(() => apiPost('/money/analyze', { filters: analyzerFilters, group: analyzerGroup }), analyzerKey, hasOpened);
   const pieArr = analyzerRes.data?.groups || [];
   const analyzerLoading = !analyzerRes.data;
-  const isShowingDescriptions = chartHeadings.included.size === 1;
+  const analyzerRefreshing = !!analyzerRes.data && analyzerRes.loading; // filters changed → dim old numbers
+  const isShowingDescriptions = !byAccount && chartHeadings.included.size === 1;
+  // Each drill-down (a category, or an account's categories) remembers where it
+  // came from, so Back undoes it in one go instead of clearing filters by hand.
+  const [drillStack, setDrillStack] = useState([]);
+  const drillInto = (label) => setDrillStack(stack => [...stack, {
+    label,
+    was: { chartAccounts, chartHeadings, analyzerGroup, filterAccounts, filterHeadings, filterTypes, filterMonths, filterYears, filterDesc },
+  }]);
+  const drillBack = () => {
+    const last = drillStack[drillStack.length - 1];
+    if (!last) return;
+    const w = last.was;
+    setChartAccounts(w.chartAccounts); setChartHeadings(w.chartHeadings); setAnalyzerGroup(w.analyzerGroup);
+    setFilterAccounts(w.filterAccounts); setFilterHeadings(w.filterHeadings); setFilterTypes(w.filterTypes);
+    setFilterMonths(w.filterMonths); setFilterYears(w.filterYears); setFilterDesc(w.filterDesc);
+    setDrillStack(drillStack.slice(0, -1));
+  };
+  // An account's categories: the donut narrows to it and goes back to categories.
+  const pickAnalyzerAccount = (account) => {
+    drillInto(account);
+    const only = { included: new Set([account]), excluded: new Set() };
+    setChartAccounts(only);
+    setFilterAccounts(only);
+    setAnalyzerGroup('heading');
+  };
   const analyzerStats = {
     count: analyzerRes.data?.count || 0,
     credit: analyzerRes.data?.credit || { count: 0, sum: 0 },
@@ -813,6 +848,27 @@ const currentMonthLabel = new Date().toLocaleString('default', { month: 'long' }
 
             {/* Analyzer Filters */}
             <div className="filter-bar" style={{ marginBottom: '1.5rem' }} ref={dropdownRef}>
+              {/* What the slices are, and the way back out of a drill-down */}
+              <div className="ac-seg sm" role="tablist" aria-label="Breakdown by">
+                {[['heading', 'Category'], ['account', 'Account']].map(([group, label]) => (
+                  <button key={group} type="button" role="tab" aria-selected={analyzerGroup === group}
+                          className={`ac-seg-btn ${analyzerGroup === group ? 'active' : ''}`}
+                          onClick={() => setAnalyzerGroup(group)}>{label}</button>
+                ))}
+              </div>
+              {drillStack.length > 0 && (
+                <button type="button" className="an-back" onClick={drillBack}
+                        title={`Back from ${drillStack.map(d => d.label).join(' › ')}`}>
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M19 12H5M12 19l-7-7 7-7" /></svg>
+                  <span>Back</span>
+                  <span className="an-crumbs">
+                    {drillStack.map((d, i) => (
+                      <span key={i}>{i > 0 && <i>›</i>}{i === drillStack.length - 1 ? <b>{d.label}</b> : d.label}</span>
+                    ))}
+                  </span>
+                </button>
+              )}
+              <span className="an-divider" aria-hidden="true" />
               <MultiSelectDropdown
                 label="Account"
                 icon="🏦"
@@ -908,6 +964,7 @@ const currentMonthLabel = new Date().toLocaleString('default', { month: 'long' }
                       setChartAccounts(empty); setChartTypes(empty); setChartMonths(empty);
                       setChartYears(empty); setChartHeadings(empty);
                       setChartDateFrom(""); setChartDateTo(""); setChartFY("");
+                      setDrillStack([]);
                     }}
                     style={{ border: '1px dashed var(--neg)', color: 'var(--neg)', background: 'transparent' }}
                   >
@@ -916,12 +973,18 @@ const currentMonthLabel = new Date().toLocaleString('default', { month: 'long' }
                 )}
             </div>
 
+            {/* While new numbers are worked out: the old ones dim under a moving line. */}
+            <div className={`load-line ${analyzerRefreshing ? 'on' : ''}`} style={{ margin: '-0.95rem 0 calc(0.95rem - 3px)' }} aria-hidden="true" />
+            <div className={`an-body ${analyzerRefreshing ? 'is-refreshing' : ''}`} aria-busy={analyzerRefreshing}>
             {/* Pie Chart + Legend Grid */}
             {pieArr.length > 0 ? (
               <div className="pie-grid">
                 {/* Pie Chart */}
                 {/* 3D Modern Donut Chart */}
                 <div style={{ position: 'relative', background: 'rgba(var(--accent-rgb), 0.04)', borderRadius: '16px', padding: '1.5rem', border: '1px solid rgba(var(--accent-rgb), 0.1)', height: '380px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                  {/* A new set of slices (a drill-down, Category ↔ Account) fades in whole: the
+                      chart's own sweep showed half-drawn slivers. New amounts just update. */}
+                  <div key={pieArr.slice(0, 10).map(d => d.name).join('|')} className="donut-in">
                   <ResponsiveContainer width="100%" height="100%">
                     <PieChart>
                       {/* 1. The 3D "Depth" Base Layer (Shifted down and darkened) */}
@@ -935,7 +998,7 @@ const currentMonthLabel = new Date().toLocaleString('default', { month: 'long' }
                         paddingAngle={5}
                         cornerRadius={8}
                         stroke="none"
-                        isAnimationActive={false} /* Base stays static while top animates */
+                        isAnimationActive={false}
                       >
                         {pieArr.slice(0, 10).map((_, i) => (
                           <Cell
@@ -957,8 +1020,7 @@ const currentMonthLabel = new Date().toLocaleString('default', { month: 'long' }
                         paddingAngle={5}
                         cornerRadius={8}
                         stroke="none"
-                        animationDuration={1200} /* Match the top layer's animation */
-                        animationEasing="ease-out"
+                        isAnimationActive={false}
                       >
                         {pieArr.slice(0, 10).map((_, i) => (
                           <Cell
@@ -979,6 +1041,7 @@ const currentMonthLabel = new Date().toLocaleString('default', { month: 'long' }
                       />
                     </PieChart>
                   </ResponsiveContainer>
+                  </div>
 
                   {/* Floating Total Label perfectly centered in the Donut hole */}
                   <div style={{ position: 'absolute', top: '50%', left: '50%', transform: 'translate(-50%, -50%)', textAlign: 'center', pointerEvents: 'none', display: 'flex', flexDirection: 'column', gap: '2px' }}>
@@ -1040,7 +1103,7 @@ const currentMonthLabel = new Date().toLocaleString('default', { month: 'long' }
                       const pct = total > 0 ? ((d.value / total) * 100).toFixed(1) : '0';
 
                       // Highlight based on whether we are looking at Headings or Descriptions
-                      const isSelected = isShowingDescriptions
+                      const isSelected = byAccount ? false : isShowingDescriptions
                         ? filterDesc === d.name
                         : filterHeadings.included.has(d.name);
 
@@ -1050,6 +1113,7 @@ const currentMonthLabel = new Date().toLocaleString('default', { month: 'long' }
                           className={`pie-legend-item ${isSelected ? 'selected' : ''}`}
                           style={{ flexShrink: 0 }}
                           onClick={() => {
+                            if (byAccount) { pickAnalyzerAccount(d.name); return; }
                             if (isShowingDescriptions) {
                               // Toggles the description filter for the table below
                               if (filterDesc === d.name) {
@@ -1060,6 +1124,7 @@ const currentMonthLabel = new Date().toLocaleString('default', { month: 'long' }
                               }
                             } else {
                               // Drills down the chart AND filters the table below!
+                              drillInto(d.name);
                               setChartHeadings({ included: new Set([d.name]), excluded: new Set() });
                               setFilterHeadings({ included: new Set([d.name]), excluded: new Set() });
                               setFilterDesc("");
@@ -1120,6 +1185,18 @@ const currentMonthLabel = new Date().toLocaleString('default', { month: 'long' }
               </div>
             )}
 
+            {byAccount && pieArr.length > 0 && (
+              <AccountAverages
+                stats={analyzerRes.data?.accounts}
+                colorFor={(account) => {
+                  const i = pieArr.findIndex(g => g.name === account);
+                  return i >= 0 ? PIE_COLORS[i % PIE_COLORS.length] : 'var(--text3)';
+                }}
+                spending={chartTypes.included.size === 1 && chartTypes.included.has('Debit')}
+                onPick={pickAnalyzerAccount}
+              />
+            )}
+
             {/* Transaction Count Stats */}
             {analyzerStats.count > 0 && (
               <div style={{ marginTop: '1.5rem', padding: '1rem', background: 'rgba(99,102,241,0.08)', borderRadius: '10px', border: '1px solid rgba(99,102,241,0.2)' }}>
@@ -1146,6 +1223,7 @@ const currentMonthLabel = new Date().toLocaleString('default', { month: 'long' }
                 </div>
               </div>
             )}
+            </div>
           </div>
         )}
       </div>

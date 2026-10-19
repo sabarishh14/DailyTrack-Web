@@ -240,6 +240,20 @@ class TenancyApiTest(unittest.TestCase):
         finally:
             money._perform_rss_sync_generator = original
 
+    def test_opening_the_app_takes_a_quick_look_at_your_letterboxd(self):
+        import blueprints.media as media
+        calls = []
+        original = (media._perform_rss_sync_generator, media.TMDB_API_KEY)
+        media._perform_rss_sync_generator = lambda username, fast_mode=False: iter(calls.append((username, fast_mode)) or [])
+        media.TMDB_API_KEY = "test"
+        try:
+            self.ok("PUT", "/api/me/settings", FRIEND, {"letterboxd_username": "friendfilms"})
+            self.call("POST", "/api/movies/sync/rss", FRIEND, {"fast": True}).get_data()
+            self.call("POST", "/api/movies/sync/rss", FRIEND, {"username": "friendfilms"}).get_data()
+            self.assertEqual(calls, [("friendfilms", True), ("friendfilms", False)])
+        finally:
+            media._perform_rss_sync_generator, media.TMDB_API_KEY = original
+
     # ---- investments and gym ----
     def test_investments_are_your_own(self):
         asset = {"category": "FD", "name": "SBI FD", "invested_value": 1000, "current_value": 1100}

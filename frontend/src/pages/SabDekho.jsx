@@ -189,6 +189,13 @@ const [view, setView] = useState('library'); // library | diary | stats
     } catch (e) { console.error(e); }
   }, [API, hdrs, showMovies, mediaType, diaryPage]);
 
+  // The quick Letterboxd sync on opening the app (App.jsx) can land while this is showing.
+  useEffect(() => {
+    const refresh = () => { if (view === 'diary') fetchDiary(); else if (view === 'library') fetchShows(); };
+    window.addEventListener('dt:letterboxd-synced', refresh);
+    return () => window.removeEventListener('dt:letterboxd-synced', refresh);
+  }, [view, fetchShows, fetchDiary]);
+
   useEffect(() => {
     if (!loading) setIsSyncing(true);
     if (view === 'library') {

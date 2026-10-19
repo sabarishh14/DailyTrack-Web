@@ -16,6 +16,7 @@ from tenancy import data_owner
 
 from sqlalchemy.orm import joinedload
 import xml.etree.ElementTree as ET
+from html import unescape
 from flask import stream_with_context, Response
 
 media_bp = Blueprint("media", __name__)
@@ -1652,6 +1653,38 @@ def delete_movie_diary():
     return jsonify({"success": True})
 
 from flask import stream_with_context, Response
+# An entry without a review only says when it was watched.
+_WATCHED_ON = re.compile(r"Watched on \w+,? \w+ \d{1,2},? \d{4}\.?", re.IGNORECASE)
+
+
+def review_from_rss(description_html):
+    """A Letterboxd RSS entry's review as plain text: tags gone (paragraphs and
+    line breaks kept as new lines) and HTML codes decoded, so It&#039;s is It's."""
+    if not description_html:
+        return ""
+    text = re.sub(r"(?i)<br\s*/?>|</p>\s*<p[^>]*>", "\n", description_html)
+    text = unescape(re.sub(r"<[^>]+>", "", text))
+    text = re.sub(r"[ \t]*\n[ \t]*", "\n", text)
+    text = re.sub(r"\n{3,}", "\n\n", text).strip()
+    return "" if _WATCHED_ON.fullmatch(text) else text
+
+
+def repair_letterboxd_reviews():
+    """Reviews synced before codes were decoded (It&#039;s), decoded once. A clean
+    review has none left, so running it again changes nothing. Returns how many."""
+    fixed = 0
+    for log in MovieDiaryLog.query.filter(db.or_(MovieDiaryLog.review.like('%&%;%'),
+                                                 MovieDiaryLog.review.ilike('Watched on %'))).all():
+        clean = unescape(log.review)
+        clean = None if _WATCHED_ON.fullmatch(clean.strip()) else clean   # no review, just the date
+        if clean != log.review:
+            log.review = clean
+            fixed += 1
+    if fixed:
+        db.session.commit()
+    return fixed
+
+
 def _perform_rss_sync_generator(username, fast_mode=False):
     import json
     yield json.dumps({"status": "Fetching RSS feed..."}) + "\n"
@@ -1715,12 +1748,8 @@ def _perform_rss_sync_generator(username, fast_mode=False):
             liked_node = item.find('letterboxd:memberLike', ns)
             liked = True if liked_node is not None and liked_node.text == 'Yes' else False
 
-            import re
             description_node = item.find('description')
-            review_text = ""
-            if description_node is not None and description_node.text:
-                review_html = description_node.text
-                review_text = re.sub(r'<[^>]+>', '', review_html).strip()
+            review_text = review_from_rss(description_node.text if description_node is not None else None)
 
             # Check if this movie exists in our local DB by name (basic check first)
             movie = Movie.query.filter_by(name=film_title).first()
@@ -1879,7 +1908,10 @@ def sync_letterboxd_rss():
     if username != letterboxd_username():
         save_letterboxd_username(username)
 
-    return Response(stream_with_context(_perform_rss_sync_generator(username)), mimetype='application/x-ndjson')
+    # {"fast": true}: the quick look the apps take on opening, at the latest few entries.
+    fast = bool(data.get('fast'))
+    return Response(stream_with_context(_perform_rss_sync_generator(username, fast_mode=fast)),
+                    mimetype='application/x-ndjson')
 
 def _matches_language(item_language, language_filter):
     """language_filter is a raw ISO code, "unknown", or "all" (no filter)."""
