@@ -10,7 +10,7 @@ import { getToken, formatDate, fmt, fmtPct, getBankEmoji, accountColor, isCcAcco
 import CustomSelect from '../components/CustomSelect';
 import ReconciliationModal from '../components/ReconciliationModal';
 import FirstAccountPrompt from '../components/FirstAccountPrompt';
-import { CardBudgetChip, MinBalanceChip, balanceLevel, cardLevel } from '../components/BalanceImpact';
+import { CardBudgetChip, MinBalanceChip, balanceLevel, budgetUsed, cardLevel } from '../components/BalanceImpact';
 import { useAccess } from '../access/AccessContext';
 import RoutinesHomeCard from './routines-components/RoutinesHomeCard';
 import { apiGet, apiPost, useApi, monthKey } from '../api/money';
@@ -239,7 +239,7 @@ const [showInvestments, setShowInvestments] = useState(false);
               const card = isCcAccount(a.account);
               const used = a.used_this_month || 0;
               const limit = card ? a.monthly_budget : a.min_balance;
-              const level = card ? cardLevel(used, a.monthly_budget ?? null) : balanceLevel(a.balance || 0, a.min_balance);
+              const level = card ? cardLevel(budgetUsed(a), a.monthly_budget ?? null) : balanceLevel(a.balance || 0, a.min_balance);
               return (
                 <div
                   className={`account-card ${showBalances && limit != null ? `floor-${level}` : ''}`}
@@ -255,7 +255,7 @@ const [showInvestments, setShowInvestments] = useState(false);
                     {showBalances && card && <span className="acc-caption">this month</span>}
                   </div>
                   {showBalances && (card
-                    ? <CardBudgetChip account={a.account} budget={a.monthly_budget} used={used} editable={fullMoney} onSaved={onRefresh} />
+                    ? <CardBudgetChip account={a.account} budget={a.monthly_budget} used={budgetUsed(a)} editable={fullMoney} onSaved={onRefresh} />
                     : <MinBalanceChip account={a.account} min={a.min_balance} editable={fullMoney} onSaved={onRefresh} />)}
                 </div>
               );

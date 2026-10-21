@@ -2437,6 +2437,7 @@ input[type="date"]::-webkit-calendar-picker-indicator {
 
   /* A grid has no row to divide: the switch and Back just take their cells. */
   .filter-bar>.an-divider { display: none; }
+  .filter-bar>.an-seg .an-seg-btn { flex: 1; }
 
   .filter-bar>div {
     width: 100%;
@@ -7474,7 +7475,6 @@ input[type="date"]::-webkit-calendar-picker-indicator {
   font-family: 'DM Sans', sans-serif; font-size: 0.82rem; font-weight: 600;
   padding: 0.4rem 0.9rem; border-radius: 7px; cursor: pointer; transition: all 0.15s;
 }
-.ac-seg.sm .ac-seg-btn { font-size: 0.75rem; padding: 0.3rem 0.65rem; }
 .ac-seg-btn:hover { color: var(--text); }
 .ac-seg-btn.active { color: #fff; background: linear-gradient(135deg, var(--accent), var(--accent3)); box-shadow: 0 2px 8px rgba(var(--accent-rgb), 0.3); }
 .ac-seg-btn.active.level-none { background: var(--card2); color: var(--text); box-shadow: none; }
@@ -10756,39 +10756,50 @@ input[type="date"]::-webkit-calendar-picker-indicator {
 .rd-preview b { color: var(--text); font-family: 'Syne', sans-serif; }
 
 /* ── Analyser by account (pages/money-components/AccountAverages.jsx) ─── */
-.acct-avg { margin-top: 1.5rem; padding: 1rem 1.1rem 0.6rem; border-radius: 16px; background: rgba(var(--accent-rgb), 0.04); border: 1px solid rgba(var(--accent-rgb), 0.1); }
-.acct-avg-head { display: flex; align-items: baseline; justify-content: space-between; flex-wrap: wrap; gap: 0.25rem 1rem; margin-bottom: 0.5rem; padding: 0 0.6rem; }
-.acct-avg-head h4 { margin: 0; font-family: 'Syne', sans-serif; font-size: 1rem; font-weight: 700; color: var(--text); }
-.acct-avg-head span { font-size: 0.78rem; color: var(--text2); }
-.acct-avg-row { display: grid; grid-template-columns: minmax(0, 2fr) minmax(0, 1fr) minmax(0, 1fr) 72px 84px; align-items: center; gap: 1rem;
-  width: 100%; padding: 0.7rem 0.6rem; border: none; border-radius: 10px; background: none; color: var(--text); font: inherit; text-align: left; cursor: pointer; transition: background 0.15s; }
+.acct-avg { margin-top: 1.5rem; padding: 0.6rem 1.1rem 0.6rem; border-radius: 16px; background: rgba(var(--accent-rgb), 0.04); border: 1px solid rgba(var(--accent-rgb), 0.1); }
+.acct-avg-row { display: grid; grid-template-columns: minmax(0, 1fr) 140px 140px 88px; align-items: center; gap: 1rem;
+  width: 100%; padding: 0.75rem 0.6rem; border: none; border-radius: 12px; background: none; color: var(--text); font: inherit; text-align: left; cursor: pointer; transition: background 0.15s; }
 button.acct-avg-row:hover { background: rgba(var(--accent-rgb), 0.08); }
-.acct-avg-labels { cursor: default; padding-top: 0.2rem; padding-bottom: 0.35rem; border-bottom: 1px solid var(--border); border-radius: 0;
+.acct-avg-labels { cursor: default; padding-top: 0.45rem; padding-bottom: 0.45rem; border-bottom: 1px solid var(--border); border-radius: 0;
   font-size: 0.68rem; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; color: var(--text3); }
 .acct-avg-labels span:not(:first-child) { text-align: right; }
-.acct-avg-name { display: flex; align-items: center; gap: 0.6rem; min-width: 0; }
-.acct-avg-name i { width: 10px; height: 10px; border-radius: 3px; flex-shrink: 0; }
+.acct-avg-name { display: flex; align-items: center; gap: 0.65rem; min-width: 0; }
+.acct-avg-name i { width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0; }
 .acct-avg-name b { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 0.88rem; font-weight: 600; }
 .acct-avg-name small { flex-shrink: 0; font-size: 0.72rem; font-weight: 600; color: var(--text2); }
 .acct-avg-num { text-align: right; white-space: nowrap; font-family: 'Syne', sans-serif; font-size: 0.88rem; font-weight: 700; font-variant-numeric: tabular-nums; }
-.acct-avg-num em { display: none; }
-.acct-avg-change { text-align: right; font-size: 0.82rem; font-weight: 700; color: var(--text3); }
-.acct-avg-change.bad { color: var(--neg); }
-.acct-avg-change.good { color: var(--pos); }
-.acct-avg-spark { display: flex; justify-content: flex-end; }
+.acct-avg-num.avg { color: var(--text2); font-weight: 600; }
+.acct-avg-num em { display: none; font-style: normal; }
+.acct-avg-num em.new { display: inline; font-family: 'DM Sans', sans-serif; font-size: 0.75rem; font-weight: 600; color: var(--text3); }
+.acct-avg-change { display: flex; justify-content: flex-end; }
+.acct-pill { padding: 0.15rem 0.55rem; border-radius: 999px; white-space: nowrap; font-size: 0.75rem; font-weight: 700; font-variant-numeric: tabular-nums;
+  color: var(--text2); background: color-mix(in srgb, var(--text2) 12%, transparent); }
+.acct-pill.bad { color: var(--neg); background: color-mix(in srgb, var(--neg) 14%, transparent); }
+.acct-pill.good { color: var(--pos); background: color-mix(in srgb, var(--pos) 14%, transparent); }
 @media (max-width: 640px) {
-  .acct-avg { padding: 0.9rem 0.5rem 0.4rem; }
-  .acct-avg-labels { display: none; }
-  .acct-avg-row { grid-template-columns: auto minmax(0, 1fr) 76px; grid-template-areas: "name name spark" "avg latest change"; gap: 0.3rem 0.75rem; }
+  .acct-avg { padding: 0.4rem 0.5rem 0.4rem; }
+  /* Two lines a row: name and the month on top, its average and the change under them */
+  .acct-avg-row { grid-template-columns: minmax(0, 1fr) auto; grid-template-areas: "name latest" "avg change"; gap: 0.25rem 0.75rem; }
   .acct-avg-row + .acct-avg-row { border-top: 1px solid var(--border); border-radius: 0; }
-  .acct-avg-name { grid-area: name; }
-  .acct-avg-spark { grid-area: spark; }
-  .acct-avg-num.avg { grid-area: avg; }
-  .acct-avg-num.latest { grid-area: latest; }
+  .acct-avg-labels { grid-template-areas: "name latest"; }
+  .acct-avg-labels .l-avg, .acct-avg-labels .l-change { display: none; }
+  .acct-avg-labels .l-name, .acct-avg-name { grid-area: name; }
+  .acct-avg-labels .l-latest, .acct-avg-num.latest { grid-area: latest; }
+  .acct-avg-num.avg { grid-area: avg; text-align: left; padding-left: calc(10px + 0.65rem); font-family: 'DM Sans', sans-serif; font-size: 0.78rem; }
+  .acct-avg-num.avg em { display: inline; margin-right: 0.3rem; }
   .acct-avg-change { grid-area: change; }
-  .acct-avg-num { text-align: left; font-size: 0.85rem; }
-  .acct-avg-num em { display: inline; margin-right: 0.35rem; font-family: 'DM Sans', sans-serif; font-style: normal; font-size: 0.7rem; font-weight: 600; color: var(--text2); }
 }
+
+/* Analyser: Category | Account as a Material 3 connected button group; the picked one turns into a full pill */
+.an-seg { display: inline-flex; gap: 2px; flex-shrink: 0; }
+.an-seg-btn { border: none; cursor: pointer; font-family: 'DM Sans', sans-serif; font-size: 0.8rem; font-weight: 600;
+  padding: 0.45rem 1.05rem; background: color-mix(in srgb, var(--text) 9%, transparent); color: var(--text2); border-radius: 6px;
+  transition: border-radius 0.25s cubic-bezier(0.2, 0, 0, 1), background 0.15s, color 0.15s; }
+.an-seg-btn:first-child { border-radius: 999px 6px 6px 999px; }
+.an-seg-btn:last-child { border-radius: 6px 999px 999px 6px; }
+.an-seg-btn:hover { color: var(--text); background: color-mix(in srgb, var(--text) 15%, transparent); }
+.an-seg-btn.active, .an-seg-btn.active:hover { border-radius: 999px; background: var(--accent); color: #fff; }
+.an-seg-btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 
 /* Analyser: Back out of a drill-down, beside the Category | Account switch */
 .an-back { display: inline-flex; align-items: center; gap: 0.4rem; flex-shrink: 1; min-width: 0; max-width: 340px; padding: 0.42rem 0.9rem 0.42rem 0.7rem;

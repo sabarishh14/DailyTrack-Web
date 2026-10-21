@@ -118,36 +118,44 @@ def _balance_changes(before):
         "below_min": acc.min_balance is not None and (acc.balance or 0) < acc.min_balance,
     } for acc in sorted(accounts, key=lambda a: a.account)]
 
-def card_usage(account_names, today=None):
+def card_usage(account_names, today=None, counted_only=False):
     """What each credit card among account_names has been used for this
     calendar month (IST): spends minus refunds, never below zero. Cards don't
     keep a balance (see apply_balance), so this is their number, and it starts
     again from zero every month. Bill payments come out of a savings account,
-    so they don't touch it."""
+    so they don't touch it.
+
+    counted_only leaves out what isn't counted in the spending analyser
+    (exclude_analytics): what a card's monthly budget is measured against."""
     cards = sorted({n for n in account_names if is_cc_account(n)})
     if not cards:
         return {}
     month = (today or datetime.now(pytz.timezone('Asia/Kolkata')).date()).replace(day=1)
     signed = db.case((db.func.lower(Transaction.type) == "credit", -Transaction.amount), else_=Transaction.amount)
-    used = dict(db.session.query(Transaction.account, db.func.sum(signed))
-                .filter(Transaction.account.in_(cards), Transaction.month == month)
-                .group_by(Transaction.account).all())
+    query = (db.session.query(Transaction.account, db.func.sum(signed))
+             .filter(Transaction.account.in_(cards), Transaction.month == month))
+    if counted_only:
+        query = query.filter(db.func.coalesce(Transaction.exclude_analytics, False) == False)  # noqa: E712
+    used = dict(query.group_by(Transaction.account).all())
     return {name: max(0.0, round(float(used.get(name) or 0), 2)) for name in cards}
 
-def _card_changes(before):
-    """Per-card used-this-month before/after for the add response, and whether
-    the card ended over its monthly budget."""
+def _card_changes(before, budget_before):
+    """Per-card used-this-month before/after for the add response (and the part
+    counted toward the budget), and whether the card ended over its monthly budget."""
     if not before:
         return []
     db.session.flush()
     after = card_usage(before)
+    budget_after = card_usage(before, counted_only=True)
     budgets = {a.account: a.monthly_budget for a in Account.query.filter(Account.account.in_(list(before))).all()}
     return [{
         "account": name,
         "before": before[name],
         "after": after.get(name, 0.0),
+        "budget_before": budget_before.get(name, 0.0),
+        "budget_after": budget_after.get(name, 0.0),
         "monthly_budget": budgets.get(name),
-        "over_budget": budgets.get(name) is not None and after.get(name, 0.0) > budgets[name],
+        "over_budget": budgets.get(name) is not None and budget_after.get(name, 0.0) > budgets[name],
     } for name in sorted(before) if name in budgets]
 
 def _need_full_money():
@@ -280,6 +288,7 @@ def get_accounts():
     accounts = [acc for acc in Account.query.all() if access.account_allowed(acc.account)]
     show = access.balances_visible
     used = card_usage([acc.account for acc in accounts]) if show else {}
+    counted = card_usage([acc.account for acc in accounts], counted_only=True) if show else {}
     result = [
         {
             "account": acc.account,
@@ -287,8 +296,10 @@ def get_accounts():
             "real_balance": acc.real_balance if show else None, # <-- ADD THIS LINE
             "balance_tracked": acc.balance_tracked,
             "min_balance": acc.min_balance if show else None,
-            # Credit cards only: spent on the card this month, and the limit for it.
+            # Credit cards only: spent on the card this month, the part of it the
+            # budget counts (not what's left out of the spending analyser), and the budget.
             "used_this_month": used.get(acc.account),
+            "budget_used_this_month": counted.get(acc.account),
             "monthly_budget": acc.monthly_budget if show else None,
         }
         for acc in accounts
@@ -374,6 +385,7 @@ def _account_dict(acc):
         "balance_tracked": acc.balance_tracked,
         "min_balance": acc.min_balance,
         "used_this_month": 0.0 if is_cc_account(acc.account) else None,
+        "budget_used_this_month": 0.0 if is_cc_account(acc.account) else None,
         "monthly_budget": acc.monthly_budget,
     }
 
@@ -458,12 +470,26 @@ def get_categories():
     except Exception as e:
         return jsonify({"success": False, "message": str(e)})
 # ---- BUDGETS ----
+def excluded_headings(headings=None):
+    """Categories switched off for the spending analyser: every transaction in
+    them is exclude_analytics (the category toggle sets them all). Optionally
+    only among headings."""
+    flag = db.func.coalesce(Transaction.exclude_analytics, False)
+    query = db.session.query(Transaction.heading)
+    if headings is not None:
+        query = query.filter(Transaction.heading.in_(headings))
+    return {h for (h,) in query.group_by(Transaction.heading)
+            .having(db.func.count() == db.func.sum(db.case((flag, 1), else_=0))).all()}
+
 @money_bp.route('/api/budgets', methods=['GET'])
 @require_access("money")
 def get_budgets():
     try:
         access = current_access()
-        budgets = [b for b in Budget.query.all() if access.category_allowed(b.category)]
+        # A category left out of the spending analyser is left out of budgets too;
+        # its budget is kept, and comes back if the category is counted again.
+        hidden = excluded_headings()
+        budgets = [b for b in Budget.query.all() if access.category_allowed(b.category) and b.category not in hidden]
         result = [{"category": b.category, "monthly_limit": b.monthly_limit} for b in budgets]
         return jsonify({"success": True, "budgets": result})
     except Exception as e:
@@ -660,13 +686,7 @@ def add_transaction():
 
         # If every existing transaction in a category is excluded from analytics,
         # new ones in that category are excluded too.
-        new_headings = {item.get('heading') for item in transactions_data}
-        excluded_flag = db.func.coalesce(Transaction.exclude_analytics, False)
-        auto_excluded = {h for (h,) in db.session.query(Transaction.heading)
-                         .filter(Transaction.heading.in_(new_headings))
-                         .group_by(Transaction.heading)
-                         .having(db.func.count() == db.func.sum(db.case((excluded_flag, 1), else_=0)))
-                         .all()}
+        auto_excluded = excluded_headings({item.get('heading') for item in transactions_data})
         
         # --- NEW: Perform a preemptive RSS sync if any transaction is a Cinema transaction
         # so that recent Letterboxd logs are in the DB before we append tags to them.
@@ -683,6 +703,7 @@ def add_transaction():
         touched_accounts = {item['account'] for item in transactions_data}
         balances_before = _balance_snapshot(touched_accounts) if access.balances_visible else {}
         cards_before = card_usage(touched_accounts) if access.balances_visible else {}
+        cards_budget_before = card_usage(touched_accounts, counted_only=True) if access.balances_visible else {}
         tx_ids = new_transaction_ids(len(transactions_data))
         movie_link_errors = []
         movie_link_successes = []
@@ -794,7 +815,7 @@ def add_transaction():
             added_count += 1
             
         balance_changes = _balance_changes(balances_before)
-        card_changes = _card_changes(cards_before)
+        card_changes = _card_changes(cards_before, cards_budget_before)
         db.session.commit()
         invalidate_stats_cache()
         send_low_balance_alert(balance_changes, data_owner())

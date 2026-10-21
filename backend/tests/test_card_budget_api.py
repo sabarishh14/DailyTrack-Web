@@ -55,9 +55,10 @@ class CardBudgetApiTest(unittest.TestCase):
         self.assertEqual(resp.status_code, 200, resp.get_json())
         return resp.get_json()
 
-    def spend(self, amount, account="CC-AXIS", when=TODAY, kind="Debit"):
+    def spend(self, amount, account="CC-AXIS", when=TODAY, kind="Debit", counted=True):
         return self.ok("POST", "/api/transactions", {
-            "account": account, "date": when.isoformat(), "type": kind, "heading": "Food", "amount": amount})
+            "account": account, "date": when.isoformat(), "type": kind, "heading": "Food", "amount": amount,
+            "exclude_analytics": not counted})
 
     def accounts(self):
         return {a["account"]: a for a in self.ok("GET", "/api/accounts")}
@@ -111,11 +112,34 @@ class CardBudgetApiTest(unittest.TestCase):
             push._send, push.threading = original_send, original_threading
 
         self.assertEqual(under["cards"], [{"account": "CC-AXIS", "before": 0, "after": 600,
+                                            "budget_before": 0, "budget_after": 600,
                                             "monthly_budget": 1000, "over_budget": False}])
         self.assertEqual(under["balances"], [])  # older apps read balances as money left
         self.assertTrue(over["cards"][0]["over_budget"])
         self.assertEqual(sent, [("card_budget", "CC-AXIS is over its monthly budget",
-                                 "CC-AXIS: ₹1,300 used · ₹300 over ₹1,000")])
+                                 "CC-AXIS: ₹1,300 spent · ₹300 over ₹1,000")])
+
+    def test_the_budget_leaves_out_what_the_spending_analyser_does(self):
+        self.ok("PUT", "/api/accounts", {"account": "CC-AXIS", "monthly_budget": 1000})
+        self.spend(600)
+        not_counted = self.spend(900, counted=False)    # e.g. rent paid by card, left out of the analyser
+        card = self.accounts()["CC-AXIS"]
+        self.assertEqual((card["used_this_month"], card["budget_used_this_month"]), (1500, 600))
+        change = not_counted["cards"][0]
+        self.assertEqual((change["after"], change["budget_after"], change["over_budget"]), (1500, 600, False))
+        self.assertIsNone(self.accounts()["KOTAK"]["budget_used_this_month"])
+
+    def test_a_category_left_out_of_the_analyser_drops_out_of_budgets_until_counted_again(self):
+        self.ok("PUT", "/api/budgets", {"category": "Food", "monthly_limit": 5000})
+        self.ok("PUT", "/api/budgets", {"category": "Rent", "monthly_limit": 20000})
+        self.spend(100)
+        self.ok("POST", "/api/transactions", {"account": "KOTAK", "date": TODAY.isoformat(), "type": "Debit",
+                                              "heading": "Rent", "amount": 1000})
+        budgets = lambda: sorted(b["category"] for b in self.ok("GET", "/api/budgets")["budgets"])
+        self.ok("PUT", "/api/transactions/category/exclude", {"heading": "Rent", "exclude": True})
+        self.assertEqual(budgets(), ["Food"])
+        self.ok("PUT", "/api/transactions/category/exclude", {"heading": "Rent", "exclude": False})
+        self.assertEqual(budgets(), ["Food", "Rent"])
 
 
 if __name__ == "__main__":

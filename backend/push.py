@@ -36,8 +36,10 @@ def card_budget_message(cards):
         return None
     title = (f"{over[0]['account']} is over its monthly budget" if len(over) == 1
              else f"{len(over)} cards are over their monthly budget")
-    lines = [f"{c['account']}: ₹{_rupees(c['after'])} used · ₹{_rupees(c['after'] - c['monthly_budget'])} "
-             f"over ₹{_rupees(c['monthly_budget'])}" for c in over]
+    # The budget counts what the spending analyser does, so that's the number here.
+    lines = [f"{c['account']}: ₹{_rupees(c.get('budget_after', c['after']))} spent · "
+             f"₹{_rupees(c.get('budget_after', c['after']) - c['monthly_budget'])} over ₹{_rupees(c['monthly_budget'])}"
+             for c in over]
     return title, "\n".join(lines)
 
 

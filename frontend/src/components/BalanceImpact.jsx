@@ -27,9 +27,14 @@ const currentMonth = () => {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
 };
 
+// The part of a card's month its budget counts: what isn't left out of the
+// spending analyser (older servers only send the whole of it).
+export const budgetUsed = (a) => a.budget_used_this_month ?? a.used_this_month ?? 0;
+
 // Like projectBalances, for credit cards: account -> { before, after } of each
 // card's spending this month as the draft rows would leave it (a Credit is a
-// refund and takes it back down). Rows dated in another month don't touch it.
+// refund and takes it back down), and { budgetBefore, budgetAfter } of the part
+// its budget counts. Rows dated in another month don't touch it.
 export function projectCards(rows, accounts) {
   const byName = Object.fromEntries((accounts || []).map(a => [a.account, a]));
   const month = currentMonth();
@@ -38,10 +43,13 @@ export function projectCards(rows, accounts) {
     const acc = byName[row.account];
     if (!acc || !isCcAccount(row.account) || acc.used_this_month == null) continue;
     if (!String(row.date || '').startsWith(month)) continue;
-    const entry = out[row.account] || (out[row.account] = { before: acc.used_this_month, after: acc.used_this_month });
+    const entry = out[row.account] || (out[row.account] = {
+      before: acc.used_this_month, after: acc.used_this_month, budgetBefore: budgetUsed(acc), budgetAfter: budgetUsed(acc) });
     const evaluated = evaluateMath(row.amount);
     // Money out of a savings account is money onto the card.
-    entry.after = Math.max(0, entry.after - balanceDelta(row.type, evaluated !== null && evaluated !== '' ? evaluated : row.amount));
+    const delta = balanceDelta(row.type, evaluated !== null && evaluated !== '' ? evaluated : row.amount);
+    entry.after = Math.max(0, entry.after - delta);
+    if (!row.exclude_analytics) entry.budgetAfter = Math.max(0, entry.budgetAfter - delta);
   }
   return out;
 }
@@ -96,7 +104,7 @@ export function BalancesPanel({ accounts, projected, saved, projectedCards = {},
     });
   const cardsShown = (accounts || [])
     .filter(a => isCcAccount(a.account) && a.used_this_month != null)
-    .filter(a => projectedCards[a.account] || savedCardsBy[a.account] || cardLevel(a.used_this_month, a.monthly_budget ?? null) === 'danger')
+    .filter(a => projectedCards[a.account] || savedCardsBy[a.account] || cardLevel(budgetUsed(a), a.monthly_budget ?? null) === 'danger')
     .sort((a, b) => a.account.localeCompare(b.account));
   if (shown.length === 0 && cardsShown.length === 0) return null;
 
@@ -141,12 +149,14 @@ export function BalancesPanel({ accounts, projected, saved, projectedCards = {},
         const recent = !draft && savedCardsBy[a.account];
         const before = draft ? draft.before : recent ? recent.before : a.used_this_month;
         const after = draft ? draft.after : recent ? recent.after : a.used_this_month;
+        // The budget is measured against the counted part only.
+        const counted = draft ? draft.budgetAfter : recent ? (recent.budget_after ?? recent.after) : budgetUsed(a);
         const delta = after - before;
         const moved = Boolean(recent) || delta !== 0;
-        const level = cardLevel(after, budget);
+        const level = cardLevel(counted, budget);
         const note = budget == null ? null
-          : level === 'danger' ? `${fmt(after - budget)} over your ${fmt(budget)} monthly budget`
-          : `${fmt(budget - after)} left of your ${fmt(budget)} monthly budget`;
+          : level === 'danger' ? `${fmt(counted - budget)} over your ${fmt(budget)} monthly budget`
+          : `${fmt(budget - counted)} left of your ${fmt(budget)} monthly budget`;
         return (
           <div
             key={a.account}
@@ -169,7 +179,7 @@ export function BalancesPanel({ accounts, projected, saved, projectedCards = {},
               <span className="bal-muted"> used this month</span>
             </div>
             {/* Filling towards the budget; once over, the tick marks where it was. */}
-            {budget != null && <FloorBar before={budget} after={after} min={budget} level={level} />}
+            {budget != null && <FloorBar before={budget} after={counted} min={budget} level={level} />}
           </div>
         );
       })}

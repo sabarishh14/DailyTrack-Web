@@ -849,10 +849,10 @@ const currentMonthLabel = new Date().toLocaleString('default', { month: 'long' }
             {/* Analyzer Filters */}
             <div className="filter-bar" style={{ marginBottom: '1.5rem' }} ref={dropdownRef}>
               {/* What the slices are, and the way back out of a drill-down */}
-              <div className="ac-seg sm" role="tablist" aria-label="Breakdown by">
+              <div className="an-seg" role="tablist" aria-label="Breakdown by">
                 {[['heading', 'Category'], ['account', 'Account']].map(([group, label]) => (
                   <button key={group} type="button" role="tab" aria-selected={analyzerGroup === group}
-                          className={`ac-seg-btn ${analyzerGroup === group ? 'active' : ''}`}
+                          className={`an-seg-btn ${analyzerGroup === group ? 'active' : ''}`}
                           onClick={() => setAnalyzerGroup(group)}>{label}</button>
                 ))}
               </div>
@@ -1338,7 +1338,8 @@ const currentMonthLabel = new Date().toLocaleString('default', { month: 'long' }
       {/* BUDGET MANAGER MODAL */}
       {isBudgetModalOpen && (
         <BudgetManagerModal
-          allHeadings={allHeadings}
+          // Categories left out of the spending analyser take no budget either.
+          allHeadings={allHeadings.filter(h => !(meta.excluded_headings || []).includes(h))}
           budgets={budgets}
           onClose={() => setIsBudgetModalOpen(false)}
           onRefresh={refreshBudgets}
