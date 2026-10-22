@@ -84,6 +84,7 @@ const [view, setView] = useState('library'); // library | diary | stats
   const [ratingFilter, setRatingFilter] = useState('all');
   const [showMoreFilters, setShowMoreFilters] = useState(false);
   const [filterOptions, setFilterOptions] = useState(null); // { years, languages } — lazy-loaded
+  const [quickTags, setQuickTags] = useState(null); // my most-used tags, loaded when a log form first opens
   const hasActiveLibraryFilters = [yearFilter, monthFilter, weekFilter, languageFilter, weekdayFilter, ratingFilter].some(f => f !== 'all');
   const clearLibraryFilters = () => {
     setYearFilter('all'); setMonthFilter('all'); setWeekFilter('all');
@@ -146,6 +147,18 @@ const [view, setView] = useState('library'); // library | diary | stats
       }
     } catch (e) { console.error(e); }
   }, [API, hdrs, showMovies, mediaType, statusFilter, yearFilter, monthFilter, weekFilter, languageFilter, weekdayFilter, ratingFilter, showsPage]);
+
+  const fetchQuickTags = useCallback(async () => {
+    try {
+      const r = await fetch(`${API}/media/tags`, { headers: hdrs() });
+      const data = await r.json();
+      if (data.success) setQuickTags(data.tags || []);
+    } catch (e) { console.error(e); }
+  }, [API, hdrs]);
+
+  useEffect(() => {
+    if (selectedShow && canEdit && quickTags === null) fetchQuickTags();
+  }, [selectedShow, canEdit, quickTags, fetchQuickTags]);
 
   const fetchFilterOptions = useCallback(async () => {
     try {
@@ -330,8 +343,8 @@ const [view, setView] = useState('library'); // library | diary | stats
     if (!selectedShow || rematchSaving) return;
     setRematchSaving(result.id);
     try {
-      const typeStr = selectedShow.type === 'movie' ? 'movies' : 'tv';
-      const r = await fetch(`${API}/${typeStr}/${selectedShow.id}/rematch`, {
+      const path = selectedShow.type === 'movie' ? 'movies' : 'tv/shows';
+      const r = await fetch(`${API}/${path}/${selectedShow.id}/rematch`, {
         method: 'POST',
         headers: hdrs(),
         body: JSON.stringify({
@@ -491,6 +504,7 @@ const [view, setView] = useState('library'); // library | diary | stats
       }
       setEditingLogIds(null);
       setEditingLog(null);
+      fetchQuickTags(); // a new tag may now be one of the most used
 
       // Auto-update status
       if (selectedShow.type === 'movie' && selectedShow.status !== 'WATCHED') {
@@ -802,6 +816,7 @@ const [view, setView] = useState('library'); // library | diary | stats
                 { key: 'TO WATCH', label: 'To Watch' },
                 { key: 'WATCHED', label: 'Watched' },
                 { key: 'DROPPED', label: 'Dropped' },
+                { key: 'all', label: 'All' },
               ].map(f => (
                 <button key={f.key} className={`tv-filter-pill ${statusFilter === f.key ? 'active' : ''}`} onClick={() => setStatusFilter(f.key)}>
                   {f.label}
@@ -1202,8 +1217,8 @@ const [view, setView] = useState('library'); // library | diary | stats
               <button className={modalView === 'details' ? 'active' : ''} onClick={() => setModalView('details')}>
                 <span>👥</span><span>Details</span>
               </button>
-              {canEdit && selectedShow.type === 'movie' && (
-                <button className={modalView === 'rematch' ? 'active' : ''}onClick={() => { setModalView('rematch'); setRematchQuery(''); setRematchResults([]); }}>
+              {canEdit && (
+                <button className={modalView === 'rematch' ? 'active' : ''} onClick={() => { setModalView('rematch'); setRematchQuery(''); setRematchResults([]); }}>
                   <span>🔄</span><span>Fix Match</span>
                 </button>
               )}
@@ -1293,6 +1308,18 @@ const [view, setView] = useState('library'); // library | diary | stats
                   </div>
                   <div className="tv-log-field tv-log-field-full">
                     <label>Tags</label>
+                    {quickTags?.length > 0 && <div className="tv-ep-grid" style={{ marginBottom: '0.5rem' }}>
+                      {quickTags.map(tag => {
+                        const tags = logTags.split(',').map(t => t.trim()).filter(Boolean);
+                        const on = tags.some(t => t.toLowerCase() === tag.toLowerCase());
+                        return (
+                          <button key={tag} type="button" className={`tv-ep-btn tv-tag-btn ${on ? 'selected' : ''}`}
+                                  onClick={() => setLogTags((on ? tags.filter(t => t.toLowerCase() !== tag.toLowerCase()) : [...tags, tag]).join(', '))}>
+                            {tag}
+                          </button>
+                        );
+                      })}
+                    </div>}
                     <input type="text" value={logTags} onChange={e => setLogTags(e.target.value)} placeholder="Comma separated (e.g. Rewatch, Comfort)" />
                   </div>
                 </div>
@@ -1406,7 +1433,7 @@ const [view, setView] = useState('library'); // library | diary | stats
             {modalView === 'rematch' && (
               <div className="tv-modal-details-section" style={{ padding: '1.25rem 1.5rem 1.5rem' }}>
                 <p style={{ margin: '0 0 1rem 0', fontSize: '0.85rem', color: 'var(--text2)', lineHeight: 1.5 }}>
-                  Wrong movie? Search for the correct one below. Add the release year for better results (e.g. <strong>Prince 2022</strong>).
+                  Wrong {selectedShow.type === 'movie' ? 'movie' : 'show'}? Search for the right one below. Add the year for better results (e.g. <strong>Prince 2022</strong>).
                 </p>
                 <div className="tv-search-bar" style={{ marginBottom: '1rem' }}>
                   <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--text2)" strokeWidth="2"><circle cx="11" cy="11" r="8" /><line x1="21" y1="21" x2="16.65" y2="16.65" /></svg>
@@ -1443,7 +1470,7 @@ const [view, setView] = useState('library'); // library | diary | stats
                         {r.poster_path ? (
                           <img src={`${TMDB_IMG}/w92${r.poster_path}`} alt="" style={{ width: '40px', borderRadius: '4px', flexShrink: 0 }} />
                         ) : (
-                          <div style={{ width: '40px', height: '60px', background: 'var(--bg)', borderRadius: '4px', flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '1.2rem' }}>🎬</div>
+                          <div style={{ width: '40px', height: '60px', background: 'var(--bg)', borderRadius: '4px', flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '1.2rem' }}>{selectedShow.type === 'movie' ? '🎬' : '📺'}</div>
                         )}
                         <div style={{ flex: 1, minWidth: 0 }}>
                           <div style={{ fontWeight: 600, fontSize: '0.95rem', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{r.name || r.title}</div>

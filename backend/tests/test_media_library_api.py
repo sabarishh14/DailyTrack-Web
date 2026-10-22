@@ -80,6 +80,50 @@ class MediaLibraryFilterTest(unittest.TestCase):
     def test_bad_values_match_nothing(self):
         self.assertEqual(self.names(weekday="sat"), [])
 
+    def quick_tags(self, query=""):
+        resp = self.client.get(f"/api/media/tags{query}",
+                               headers={"Authorization": f"Bearer {setup._token(OWNER)}"})
+        self.assertEqual(resp.status_code, 200, resp.get_json())
+        return resp.get_json()["tags"]
+
+    def test_quick_tags_are_my_most_used_first(self):
+        mine = dict(owner_email=OWNER)
+        with self.app.app_context():
+            db.session.add_all([
+                MovieDiaryLog(movie_id=1, date=date(2026, 4, 1), tags="IMAX, overall-theatres, theatres-2026", **mine),
+                MovieDiaryLog(movie_id=2, date=date(2026, 4, 2), tags="imax, Friends", **mine),
+                MovieDiaryLog(movie_id=2, date=date(2026, 4, 9), tags="IMAX", **mine),
+                # Five episodes on one day is one viewing; another day is a second one.
+                *[TvDiaryLog(tv_show_id=10, date=date(2026, 4, 3), season_number=1, episode_number=n,
+                             tags="Netflix", **mine) for n in range(1, 6)],
+                TvDiaryLog(tv_show_id=10, date=date(2026, 4, 10), season_number=1, episode_number=6,
+                           tags="Netflix", **mine),
+                # Someone else's diary never shows up here.
+                MovieDiaryLog(movie_id=1, date=date(2026, 4, 4), tags="Secret", owner_email=setup.OTHER),
+            ])
+            db.session.commit()
+        # IMAX 3 times (spelled IMAX twice); Netflix twice; Friends once. Theatre tags are Money's.
+        self.assertEqual(self.quick_tags(), ["IMAX", "Netflix", "Friends"])
+        self.assertEqual(self.quick_tags("?limit=1"), ["IMAX"])
+
+    def rematch(self, show_id, body):
+        return self.client.post(f"/api/tv/shows/{show_id}/rematch", json=body,
+                                headers={"Authorization": f"Bearer {setup._token(OWNER)}"})
+
+    def test_a_show_can_be_rematched_and_keeps_its_logs(self):
+        resp = self.rematch(10, {"tmdb_id": 299, "name": "Dark (2017)", "poster_path": "/dark.jpg"})
+        self.assertEqual(resp.status_code, 200, resp.get_json())
+        self.assertEqual(resp.get_json()["show"], {"id": 10, "tmdb_id": 299, "name": "Dark (2017)",
+                                                   "poster_path": "/dark.jpg", "status": "WATCHING", "type": "tv"})
+        self.assertEqual(self.names(rating="4.5", type="tv"), ["Dark (2017)"])  # its log came along
+
+    def test_rematching_onto_a_show_already_in_the_library_is_refused(self):
+        with self.app.app_context():
+            db.session.add(TvShow(id=11, tmdb_id=300, name="Other", owner_email=OWNER))
+            db.session.commit()
+        self.assertEqual(self.rematch(10, {"tmdb_id": 300, "name": "Other"}).status_code, 400)
+        self.assertEqual(self.rematch(99, {"tmdb_id": 400, "name": "Nope"}).status_code, 404)
+
 
 if __name__ == "__main__":
     unittest.main()

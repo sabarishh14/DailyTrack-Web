@@ -5052,6 +5052,9 @@ input[type="date"]::-webkit-calendar-picker-indicator {
   color: #10b981;
 }
 
+/* Quick tags in the log form: words, not numbers */
+.tv-ep-btn.tv-tag-btn { width: auto; padding: 0 0.75rem; }
+
 .tv-ep-select-all {
   float: right;
   background: none;

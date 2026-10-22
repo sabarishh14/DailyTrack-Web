@@ -1560,11 +1560,50 @@ def rematch_movie(movie_id):
     invalidate_stats_cache()
     
     return jsonify({
-        "success": True, 
-        "message": "Movie re-matched", 
+        "success": True,
+        "message": "Movie re-matched",
         "show": {
-            "id": movie.id, "tmdb_id": movie.tmdb_id, "name": movie.name, 
+            "id": movie.id, "tmdb_id": movie.tmdb_id, "name": movie.name,
             "poster_path": movie.poster_path, "status": movie.status, "type": "movie"
+        }
+    })
+
+
+@media_bp.route('/api/tv/shows/<int:show_id>/rematch', methods=['POST'])
+@require_access("sabdekho")
+def rematch_tv_show(show_id):
+    """Points a show at another TMDB entry (a wrong match): its name, poster
+    and language follow the new one; its logs and status stay as they are."""
+    show = TvShow.query.get(show_id)
+    if not show:
+        return jsonify({"success": False, "message": "Show not found"}), 404
+
+    data = request.json or {}
+    tmdb_id = data.get('tmdb_id')
+    name = data.get('name')
+    if not tmdb_id or not name:
+        return jsonify({"success": False, "message": "tmdb_id and name required"}), 400
+
+    existing = TvShow.query.filter_by(tmdb_id=tmdb_id).first()
+    if existing and existing.id != show_id:
+        return jsonify({"success": False, "message": "This TMDB show is already in your library."}), 400
+
+    show.tmdb_id = tmdb_id
+    show.name = name
+    show.poster_path = data.get('poster_path')
+    language = fetch_tmdb_tv_language(tmdb_id)
+    if language:
+        show.language = language
+
+    db.session.commit()
+    invalidate_stats_cache()
+
+    return jsonify({
+        "success": True,
+        "message": "Show re-matched",
+        "show": {
+            "id": show.id, "tmdb_id": show.tmdb_id, "name": show.name,
+            "poster_path": show.poster_path, "status": show.status, "type": "tv"
         }
     })
 
@@ -2102,6 +2141,45 @@ def get_media_filters():
         languages.append({"code": "unknown", "label": "Unknown"})
 
     return jsonify({"success": True, "years": years, "languages": languages})
+
+
+def _auto_theatre_tag(tag):
+    """Tags a movie ticket in Money adds by itself; nobody picks these by hand."""
+    return tag == 'overall-theatres' or tag.startswith('theatres-')
+
+
+@media_bp.route('/api/media/tags', methods=['GET'])
+@require_access("sabdekho")
+def get_media_tags():
+    """The log form's one-tap tags: the ones this person has used most, first.
+    A show's episodes logged on one day are one viewing, so a binge counts once."""
+    from collections import Counter, defaultdict
+
+    limit = max(1, min(request.args.get('limit', 8, type=int) or 8, 50))
+    uses, spellings, latest, seen = Counter(), defaultdict(Counter), {}, set()
+
+    def add(viewing, day, raw):
+        for tag in {t.strip() for t in raw.split(',') if t.strip()}:
+            key = tag.lower()
+            if _auto_theatre_tag(key):
+                continue
+            spellings[key][tag] += 1
+            if day and (key not in latest or day > latest[key]):
+                latest[key] = day
+            if (viewing, key) not in seen:
+                seen.add((viewing, key))
+                uses[key] += 1
+
+    for log_id, day, raw in db.session.query(MovieDiaryLog.id, MovieDiaryLog.date, MovieDiaryLog.tags) \
+            .filter(MovieDiaryLog.tags.isnot(None)):
+        add(('movie', log_id), day, raw)
+    for show_id, day, raw in db.session.query(TvDiaryLog.tv_show_id, TvDiaryLog.date, TvDiaryLog.tags) \
+            .filter(TvDiaryLog.tags.isnot(None)):
+        add(('tv', show_id, day), day, raw)
+
+    # Most used first; a tie goes to the one used more recently.
+    ranked = sorted(uses, key=lambda k: (-uses[k], -(latest[k].toordinal() if k in latest else 0), k))
+    return jsonify({"success": True, "tags": [spellings[k].most_common(1)[0][0] for k in ranked[:limit]]})
 
 @media_bp.route('/api/media/diary', methods=['GET'])
 @require_access("sabdekho")
