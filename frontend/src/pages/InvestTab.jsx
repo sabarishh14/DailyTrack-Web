@@ -252,8 +252,9 @@ function InvestTab({ investments, manualAssets, assetList, onAdd }) {
   const [drillDownDate, setDrillDownDate] = useState(null);
   const [drillDownData, setDrillDownData] = useState([]);
   const [drillDownType, setDrillDownType] = useState(null);
-  const [drillSortBy, setDrillSortBy] = useState("symbol");
-  const [drillSortDir, setDrillSortDir] = useState("asc");
+  // Biggest holding first, as the comparison lists them.
+  const [drillSortBy, setDrillSortBy] = useState("current_value");
+  const [drillSortDir, setDrillSortDir] = useState("desc");
   const [viewMode, setViewMode] = useState("ALL");
 
   // 🚀 COMPARISON STATES
@@ -396,7 +397,7 @@ function InvestTab({ investments, manualAssets, assetList, onAdd }) {
       setDrillDownData(drilldownCache.current[cacheKey]);
       setDrillDownType(type);
       setDrillDownDate(dateStr);
-      setDrillSortBy("symbol"); setDrillSortDir("asc");
+      setDrillSortBy("current_value"); setDrillSortDir("desc");
       return;
     }
 
@@ -416,7 +417,7 @@ function InvestTab({ investments, manualAssets, assetList, onAdd }) {
 
       drilldownCache.current[cacheKey] = dataWithRet;
       setDrillDownData(dataWithRet);
-      setDrillSortBy("symbol"); setDrillSortDir("asc");
+      setDrillSortBy("current_value"); setDrillSortDir("desc");
     } catch (e) {
       console.error(e);
     } finally {
@@ -1850,8 +1851,11 @@ function InvestTab({ investments, manualAssets, assetList, onAdd }) {
                             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '1rem' }}>
                               <div>
                                 <div style={{ fontWeight: 700, fontSize: '1.05rem', color: 'var(--text)', lineHeight: 1.3 }}>{h.symbol}</div>
-                                <div style={{ fontSize: '0.8rem', color: 'var(--text3)', marginTop: '6px' }}>
-                                  {h.quantity.toFixed(2)} units • Avg: {perUnit(h.average_price)} • {drillDownType === 'EQUITY' ? 'LTP' : 'NAV'}: {perUnit(drillDownType === 'EQUITY' ? h.ltp : h.nav)}
+                                {/* Each figure stays whole when the line wraps. */}
+                                <div style={{ display: 'flex', flexWrap: 'wrap', columnGap: '12px', rowGap: '2px', fontSize: '0.8rem', color: 'var(--text3)', marginTop: '6px' }}>
+                                  <span style={{ whiteSpace: 'nowrap' }}>{units(h.quantity)} units</span>
+                                  <span style={{ whiteSpace: 'nowrap' }}>Avg: {perUnit(h.average_price)}</span>
+                                  <span style={{ whiteSpace: 'nowrap' }}>{drillDownType === 'EQUITY' ? 'LTP' : 'NAV'}: {perUnit(drillDownType === 'EQUITY' ? h.ltp : h.nav)}</span>
                                 </div>
                               </div>
                               <div className={isPos ? 'pos' : 'neg'} style={{ fontWeight: 700, fontSize: '0.85rem', background: isPos ? 'rgba(34, 197, 94, 0.1)' : 'rgba(239, 68, 68, 0.1)', padding: '0.3rem 0.6rem', borderRadius: '6px', whiteSpace: 'nowrap' }}>
