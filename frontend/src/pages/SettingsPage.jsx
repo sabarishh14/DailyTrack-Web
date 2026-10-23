@@ -34,6 +34,11 @@ const SECTIONS = [
     show: (a) => a.isOwner,
   },
   {
+    id: 'invest', icon: '📈', title: 'Investments', desc: 'How your Kite holdings are valued',
+    keywords: 'kite zerodha stocks shares mutual funds mf portfolio daily manual sync prices nav value',
+    show: (a) => a.isOwner && a.can('invest', 'edit'),
+  },
+  {
     id: 'sabdekho', icon: '🎬', title: 'SabDekho', desc: 'Films and Letterboxd',
     keywords: 'movies films letterboxd rss diary tv shows sabdekho',
     show: (a) => a.can('sabdekho'),
@@ -159,6 +164,7 @@ export default function SettingsPage(props) {
               {s.id === 'accounts' && <AccountsSection accounts={props.accounts} onRefresh={props.onRefresh} onToast={setToast} />}
               {s.id === 'appearance' && <AppearanceSection {...props} />}
               {s.id === 'money' && <MoneySection {...props} full={access.isOwner} onToast={setToast} />}
+              {s.id === 'invest' && <InvestSection onRefresh={props.onRefresh} onToast={setToast} />}
               {s.id === 'sabdekho' && <SabDekhoSection {...props} canSync={access.can('sabdekho', 'edit')} />}
               {s.id === 'nagapandi' && <NagapandiSection {...props} />}
               {s.id === 'sharing' && <SharingSection viewAs={props.viewAs} onSwitchView={props.onSwitchView} onToast={setToast} />}
@@ -481,6 +487,56 @@ function MoneySection({ accounts = [], budgets = [], refreshBudgets, onRefresh, 
           onRefresh={onRefresh}
         />
       )}
+    </div>
+  );
+}
+
+// ── Investments ──────────────────────────────────────────────────────────────
+
+const KITE_MODES = [
+  ['manual', 'Manual', 'Their worth changes when you sync Kite.'],
+  ['daily', 'Daily', 'Repriced every day. Sync Kite after you buy or sell.'],
+];
+
+function InvestSection({ onRefresh, onToast }) {
+  const [mode, setMode] = useState(null);
+  useEffect(() => {
+    apiGet('/auth/me').then(r => setMode(r.settings?.kite_valuation || 'manual')).catch(() => setMode('manual'));
+  }, []);
+
+  const pick = async (next) => {
+    if (next === mode) return;
+    const before = mode;
+    setMode(next);
+    try {
+      const res = await fetch(`${API}/me/settings`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${getToken()}` },
+        body: JSON.stringify({ kite_valuation: next }),
+      }).then(r => r.json());
+      if (!res.success) throw new Error(res.message || "Couldn't save");
+      // Today's prices show up on the Investments page straight away.
+      if (next === 'daily') onRefresh();
+    } catch (e) {
+      setMode(before);
+      onToast(e.message);
+    }
+  };
+
+  return (
+    <div className="st-card st-rows">
+      <Row icon="🪁" title="Kite holdings" desc={KITE_MODES.find(([id]) => id === mode)?.[2] || ' '}>
+        <div className="ac-seg" role="radiogroup" aria-label="Kite holdings">
+          {KITE_MODES.map(([id, label]) => (
+            <button
+              key={id} type="button" role="radio" aria-checked={mode === id} disabled={!mode}
+              className={`ac-seg-btn ${mode === id ? 'active' : ''}`} onClick={() => pick(id)}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+      </Row>
     </div>
   );
 }

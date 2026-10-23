@@ -73,6 +73,8 @@ class EquityHolding(Owned, db.Model):
     ltp = db.Column(db.Float, nullable=False)
     invested_value = db.Column(db.Float, nullable=False)
     current_value = db.Column(db.Float, nullable=False)
+    # A day without a sync: the last sync's holdings at that day's prices (kite_daily.py).
+    repriced = db.Column(db.Boolean, nullable=False, default=False, server_default=db.false())
 class PhysicalActivity(Owned, db.Model):
     __tablename__ = "physical_activity"
     __table_args__ = (db.UniqueConstraint("owner_email", "date", name="uq_physical_activity_owner_date"),)
@@ -96,6 +98,8 @@ class MutualFundHolding(Owned, db.Model):
     nav = db.Column(db.Float, nullable=False)
     invested_value = db.Column(db.Float, nullable=False)
     current_value = db.Column(db.Float, nullable=False)
+    isin = db.Column(db.String(12))    # Kite's tradingsymbol; missing on syncs before it was kept
+    repriced = db.Column(db.Boolean, nullable=False, default=False, server_default=db.false())
 class ManualAsset(Owned, db.Model):
     __tablename__ = "manual_assets"
 
@@ -323,6 +327,9 @@ class UserSettings(db.Model):
     __tablename__ = "user_settings"
     email = db.Column(db.String(120), primary_key=True)
     letterboxd_username = db.Column(db.String(60))
+    # Kite's holdings: 'manual' (worth changes with a sync) or 'daily' (repriced each day).
+    kite_valuation = db.Column(db.String(10))
+    kite_priced_at = db.Column(db.DateTime)   # IST, the last time they were repriced
     updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 class DeviceToken(db.Model):
     """A phone that wants push alerts (low balance), per signed-in user."""

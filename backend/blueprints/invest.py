@@ -13,6 +13,7 @@ from extensions import (
 from models import *
 from access import require_api_key, require_admin, require_access, current_access, owner_only
 import funds_service
+import kite_daily
 
 import hashlib
 from dateutil.relativedelta import relativedelta
@@ -176,7 +177,9 @@ def get_portfolio_xirr():
 @require_access("invest")
 def get_investments():
     # The first look each day values funds held outside Kite and adds due SIPs,
-    # and brings RDs up to date: the phone never calls the cron above.
+    # reprices Kite's holdings (on Daily), and brings RDs up to date: the phone
+    # never calls the cron above.
+    kite_daily.reprice_if_due()
     funds_service.refresh_if_due()
     if refresh_recurring_deposits(datetime.now(pytz.timezone('Asia/Kolkata')).date()):
         update_latest_portfolio_snapshot()
@@ -461,8 +464,10 @@ def sync_kite_direct():
         today_date = datetime.now(ist_timezone).date()
         
         # 1. Check if already synced today. (Today's snapshot may already exist
-        # from valuing funds held outside Kite; the sync adds to it.)
-        if EquityHolding.query.filter_by(date=today_date).first() or MutualFundHolding.query.filter_by(date=today_date).first():
+        # from valuing funds held outside Kite, or repricing the last sync's
+        # holdings; the sync adds to it, or replaces them.)
+        if (EquityHolding.query.filter_by(date=today_date, repriced=False).first()
+                or MutualFundHolding.query.filter_by(date=today_date, repriced=False).first()):
             return jsonify({"success": False, "message": f"Already synced investments for {today_date.strftime('%d/%m/%Y')}!"})
 
         # 2. Auth with Kite
@@ -529,7 +534,7 @@ def sync_kite_direct():
             
             mf_records.append(MutualFundHolding(
                 id=int(datetime.now().timestamp() * 1000) + len(mf_records),
-                date=today_date, symbol=real_name, quantity=qty, average_price=avg_price,
+                date=today_date, symbol=real_name, isin=raw_symbol, quantity=qty, average_price=avg_price,
                 nav=nav, invested_value=inv_val, current_value=curr_val
             ))
 
@@ -561,6 +566,8 @@ def sync_kite_direct():
         # ==========================================
         # Kite + funds held outside it + manual assets, worked out in one place
         # (funds_service.recompute_snapshot) so every path agrees.
+        EquityHolding.query.filter_by(date=today_date, repriced=True).delete(synchronize_session=False)
+        MutualFundHolding.query.filter_by(date=today_date, repriced=True).delete(synchronize_session=False)
         db.session.add_all(mf_records)
         db.session.add_all(eq_records)
         db.session.flush()

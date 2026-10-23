@@ -14,6 +14,7 @@ from extensions import (
 from models import *
 from access import require_api_key, require_admin, require_access, current_access, get_access, invalidate_access, MODULES
 from blueprints.media import letterboxd_username, save_letterboxd_username, LETTERBOXD_NAME
+import kite_daily
 
 
 auth_bp = Blueprint("auth", __name__)
@@ -133,7 +134,10 @@ def _my_settings():
     """The signed-in person's own settings, even while viewing someone else's data."""
     me = current_access().email
     row = db.session.get(UserSettings, me) if me else None
-    return {"letterboxd_username": (row.letterboxd_username or None) if row else None}
+    return {
+        "letterboxd_username": (row.letterboxd_username or None) if row else None,
+        "kite_valuation": kite_daily.kite_mode(me) if me else "manual",
+    }
 
 
 @auth_bp.route('/api/me/settings', methods=['PUT'])
@@ -146,4 +150,14 @@ def update_my_settings():
         if name and not LETTERBOXD_NAME.match(name):
             return jsonify({"success": False, "message": "That isn't a Letterboxd username"}), 400
         save_letterboxd_username(name)
+    if 'kite_valuation' in data:
+        me = current_access().email
+        if not me or data.get('kite_valuation') not in kite_daily.MODES:
+            return jsonify({"success": False, "message": "Pick manual or daily"}), 400
+        row = db.session.get(UserSettings, me)
+        if row is None:
+            row = UserSettings(email=me)
+            db.session.add(row)
+        row.kite_valuation = data['kite_valuation']
+        db.session.commit()
     return jsonify({"success": True, "settings": _my_settings()})
