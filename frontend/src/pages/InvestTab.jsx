@@ -17,20 +17,20 @@ import { useAccess } from '../access/AccessContext';
 
 // ── A snapshot compared with another: each holding then, and what changed ──
 // minmax(0, …): every row is its own grid, so columns can't size to their content.
-const COMPARE_COLUMNS = 'minmax(0, 1.8fr) minmax(0, 0.7fr) minmax(0, 1.1fr) minmax(0, 1.1fr) minmax(0, 1.2fr) minmax(0, 1.6fr)';
+const COMPARE_COLUMNS = 'minmax(0, 2.2fr) minmax(0, 0.8fr) minmax(0, 1.1fr) minmax(0, 1.1fr) minmax(0, 1.2fr) minmax(0, 1.2fr)';
 const STACK = { flexDirection: 'column', alignItems: 'flex-start', justifyContent: 'center', gap: '4px' };
 const rupees = (n) => '₹' + Math.round(n).toLocaleString('en-IN');
 const perUnit = (n) => '₹' + n.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 const units = (n) => n.toLocaleString('en-IN', { maximumFractionDigits: 3 });
 
-/** A holding's return in ₹ and, beside it, as a share of what went in. */
+/** A holding's return in ₹ and, below it, as a share of what went in (as on its own). */
 function ReturnFigure({ amount, pct }) {
   if (pct === null) return <span style={{ color: 'var(--text3)' }}>—</span>;
   const up = amount >= 0;
   return (
-    <span className={up ? 'pos' : 'neg'} style={{ fontWeight: 700, display: 'flex', flexWrap: 'wrap', alignItems: 'baseline', columnGap: '6px' }}>
-      <span style={{ whiteSpace: 'nowrap' }}>{up ? '+' : '-'}{rupees(Math.abs(amount))}</span>
-      <span style={{ fontSize: '0.75rem', fontWeight: 600, opacity: 0.85, whiteSpace: 'nowrap' }}>{fmtPct(pct)}</span>
+    <span className={up ? 'pos' : 'neg'} style={{ display: 'flex', flexDirection: 'column', gap: '2px', whiteSpace: 'nowrap' }}>
+      <span style={{ fontWeight: 700 }}>{up ? '+' : '-'}{rupees(Math.abs(amount))}</span>
+      <span style={{ fontSize: '0.75rem', opacity: 0.8 }}>({fmtPct(pct)})</span>
     </span>
   );
 }
@@ -517,6 +517,53 @@ function InvestTab({ investments, manualAssets, assetList, onAdd }) {
     totals.total_stocks = comparisonData.length;
     return totals;
   }, [comparisonData, drillDownCompareDate]);
+
+  // The snapshot on its own: what its holdings add up to.
+  const snapshotTotals = useMemo(() => {
+    const inv = drillDownData.reduce((sum, h) => sum + (h.invested_value || 0), 0);
+    const curr = drillDownData.reduce((sum, h) => sum + (h.current_value || 0), 0);
+    return { inv, curr, ret: curr - inv, ret_pct: inv > 0 ? ((curr - inv) / inv) * 100 : 0 };
+  }, [drillDownData]);
+
+  // Invested, Current Value and Returns as cards. Cards with valB sit beside the
+  // compared snapshot's and say what changed; without, it's just the day's.
+  const renderSnapshotTotals = (cards) => {
+    const compared = cards.some(card => card.valB !== undefined);
+    const signed = (card, val) => `${card.label === 'Returns' ? (val >= 0 ? '+' : '-') : ''}₹${Math.abs(val).toLocaleString('en-IN', { maximumFractionDigits: 0 })}`;
+    return (
+      // On a phone, the day's own three fit as two and one.
+      <div style={{ display: 'grid', gridTemplateColumns: isMobile ? (compared ? '1fr' : 'repeat(2, 1fr)') : 'repeat(3, 1fr)', gap: '0.75rem', marginBottom: '1.25rem' }}>
+        {cards.map(card => (
+          <div key={card.label} style={{ background: 'var(--bg2)', border: '1px solid var(--border)', borderRadius: '12px', padding: '1rem 1.25rem', gridColumn: isMobile && !compared && card.label === 'Returns' ? '1 / -1' : undefined }}>
+            <div style={{ fontSize: '0.7rem', color: 'var(--text3)', textTransform: 'uppercase', fontWeight: 700, letterSpacing: '0.5px', marginBottom: '0.6rem' }}>{card.label}</div>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', gap: '0.5rem' }}>
+              <div>
+                {compared && <div style={{ fontSize: '0.65rem', color: 'var(--text3)', marginBottom: '2px' }}>{formatDate(drillDownDate)}</div>}
+                <div style={{ fontSize: '1.1rem', fontWeight: 700, color: card.label === 'Returns' ? (card.valA >= 0 ? 'var(--pos)' : 'var(--neg)') : 'var(--text)', fontFamily: "'DM Sans', sans-serif", whiteSpace: 'nowrap' }}>
+                  {signed(card, card.valA)}
+                  {card.pctA !== undefined && <span style={{ fontSize: '0.7rem', opacity: 0.7, marginLeft: '4px' }}>({card.pctA >= 0 ? '+' : ''}{card.pctA.toFixed(1)}%)</span>}
+                </div>
+              </div>
+              {compared && (
+                <div style={{ textAlign: 'right' }}>
+                  <div style={{ fontSize: '0.65rem', color: 'var(--text3)', marginBottom: '2px' }}>{formatDate(drillDownCompareDate)}</div>
+                  <div style={{ fontSize: '0.9rem', fontWeight: 600, color: 'var(--text2)', fontFamily: "'DM Sans', sans-serif" }}>
+                    {signed(card, card.valB)}
+                    {card.pctB !== undefined && <span style={{ fontSize: '0.65rem', opacity: 0.7, marginLeft: '3px' }}>({card.pctB >= 0 ? '+' : ''}{card.pctB.toFixed(1)}%)</span>}
+                  </div>
+                </div>
+              )}
+            </div>
+            {compared && (
+              <div style={{ marginTop: '0.5rem', borderTop: '1px solid var(--border)', paddingTop: '0.5rem' }}>
+                <DiffBadge diff={card.diff} isCurrency={true} pct={card.diffPct ?? null} />
+              </div>
+            )}
+          </div>
+        ))}
+      </div>
+    );
+  };
 
   const availableCompareDates = useMemo(() => {
     if (!drillDownDate) return [];
@@ -1623,38 +1670,11 @@ function InvestTab({ investments, manualAssets, assetList, onAdd }) {
                   /* 🚀 COMPARISON VIEW 🚀 */
                   <>
                     {/* Summary Banner */}
-                    {comparisonSummary && (
-                      <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : 'repeat(3, 1fr)', gap: '0.75rem', marginBottom: '1.25rem' }}>
-                        {[
-                          { label: 'Invested', valA: comparisonSummary.inv_A, valB: comparisonSummary.inv_B, diff: comparisonSummary.inv_diff },
-                          { label: 'Current Value', valA: comparisonSummary.curr_A, valB: comparisonSummary.curr_B, diff: comparisonSummary.curr_diff, diffPct: comparisonSummary.curr_B > 0 ? (comparisonSummary.curr_diff / comparisonSummary.curr_B) * 100 : null },
-                          { label: 'Returns', valA: comparisonSummary.ret_A, valB: comparisonSummary.ret_B, diff: comparisonSummary.ret_diff, pctA: comparisonSummary.ret_pct_A, pctB: comparisonSummary.ret_pct_B },
-                        ].map((card, ci) => (
-                          <div key={ci} style={{ background: 'var(--bg2)', border: '1px solid var(--border)', borderRadius: '12px', padding: '1rem 1.25rem' }}>
-                            <div style={{ fontSize: '0.7rem', color: 'var(--text3)', textTransform: 'uppercase', fontWeight: 700, letterSpacing: '0.5px', marginBottom: '0.6rem' }}>{card.label}</div>
-                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', gap: '0.5rem' }}>
-                              <div>
-                                <div style={{ fontSize: '0.65rem', color: 'var(--text3)', marginBottom: '2px' }}>{formatDate(drillDownDate)}</div>
-                                <div style={{ fontSize: '1.1rem', fontWeight: 700, color: card.label === 'Returns' ? (card.valA >= 0 ? 'var(--pos)' : 'var(--neg)') : 'var(--text)', fontFamily: "'DM Sans', sans-serif" }}>
-                                  {card.label === 'Returns' && (card.valA >= 0 ? '+' : '-')}₹{Math.abs(card.valA).toLocaleString('en-IN', { maximumFractionDigits: 0 })}
-                                  {card.pctA !== undefined && <span style={{ fontSize: '0.7rem', opacity: 0.7, marginLeft: '4px' }}>({card.pctA >= 0 ? '+' : ''}{card.pctA.toFixed(1)}%)</span>}
-                                </div>
-                              </div>
-                              <div style={{ textAlign: 'right' }}>
-                                <div style={{ fontSize: '0.65rem', color: 'var(--text3)', marginBottom: '2px' }}>{formatDate(drillDownCompareDate)}</div>
-                                <div style={{ fontSize: '0.9rem', fontWeight: 600, color: 'var(--text2)', fontFamily: "'DM Sans', sans-serif" }}>
-                                  {card.label === 'Returns' && (card.valB >= 0 ? '+' : '-')}₹{Math.abs(card.valB).toLocaleString('en-IN', { maximumFractionDigits: 0 })}
-                                  {card.pctB !== undefined && <span style={{ fontSize: '0.65rem', opacity: 0.7, marginLeft: '3px' }}>({card.pctB >= 0 ? '+' : ''}{card.pctB.toFixed(1)}%)</span>}
-                                </div>
-                              </div>
-                            </div>
-                            <div style={{ marginTop: '0.5rem', borderTop: '1px solid var(--border)', paddingTop: '0.5rem' }}>
-                              <DiffBadge diff={card.diff} isCurrency={true} pct={card.diffPct ?? null} />
-                            </div>
-                          </div>
-                        ))}
-                      </div>
-                    )}
+                    {comparisonSummary && renderSnapshotTotals([
+                      { label: 'Invested', valA: comparisonSummary.inv_A, valB: comparisonSummary.inv_B, diff: comparisonSummary.inv_diff },
+                      { label: 'Current Value', valA: comparisonSummary.curr_A, valB: comparisonSummary.curr_B, diff: comparisonSummary.curr_diff, diffPct: comparisonSummary.curr_B > 0 ? (comparisonSummary.curr_diff / comparisonSummary.curr_B) * 100 : null },
+                      { label: 'Returns', valA: comparisonSummary.ret_A, valB: comparisonSummary.ret_B, diff: comparisonSummary.ret_diff, pctA: comparisonSummary.ret_pct_A, pctB: comparisonSummary.ret_pct_B },
+                    ])}
                     {comparisonSummary && (
                       <div style={{ display: 'flex', gap: '0.75rem', marginBottom: '1rem', flexWrap: 'wrap' }}>
                         <span style={{ fontSize: '0.75rem', color: 'var(--text3)', fontWeight: 600, fontFamily: "'DM Sans', sans-serif" }}>
@@ -1779,10 +1799,21 @@ function InvestTab({ investments, manualAssets, assetList, onAdd }) {
                   </>
                 ) : (
                   /* 🚀 STANDARD VIEW (Original Logic) 🚀 */
-                  !isMobile ? (
+                  <>
+                  {drillDownData.length > 0 && renderSnapshotTotals([
+                    { label: 'Invested', valA: snapshotTotals.inv },
+                    { label: 'Current Value', valA: snapshotTotals.curr },
+                    { label: 'Returns', valA: snapshotTotals.ret, pctA: snapshotTotals.ret_pct },
+                  ])}
+                  {drillDownData.length > 0 && (
+                    <div style={{ marginBottom: '1rem', fontSize: '0.75rem', color: 'var(--text3)', fontWeight: 600, fontFamily: "'DM Sans', sans-serif" }}>
+                      {drillDownData.length} {drillDownType === 'EQUITY' ? 'stocks' : 'funds'}
+                    </div>
+                  )}
+                  {!isMobile ? (
                     <div style={{ width: '100%', overflowX: 'auto', WebkitOverflowScrolling: 'touch' }}>
                       <div className="data-table" style={{ minWidth: '750px' }}>
-                        <div className="table-header" style={{ gridTemplateColumns: '2.5fr 1fr 1fr 1fr 1fr 1fr 1.2fr', cursor: 'pointer', userSelect: 'none' }}>
+                        <div className="table-header" style={{ gridTemplateColumns: 'minmax(0, 2.5fr) repeat(5, minmax(0, 1fr)) minmax(0, 1.2fr)', cursor: 'pointer', userSelect: 'none' }}>
                           <span onClick={() => handleDrillSort('symbol')}>Symbol {drillSortBy === 'symbol' && <span className="sort-indicator">{drillSortDir === 'asc' ? '↑' : '↓'}</span>}</span>
                           <span onClick={() => handleDrillSort('quantity')}>Qty {drillSortBy === 'quantity' && <span className="sort-indicator">{drillSortDir === 'asc' ? '↑' : '↓'}</span>}</span>
                           <span onClick={() => handleDrillSort('average_price')}>Avg Price {drillSortBy === 'average_price' && <span className="sort-indicator">{drillSortDir === 'asc' ? '↑' : '↓'}</span>}</span>
@@ -1794,15 +1825,15 @@ function InvestTab({ investments, manualAssets, assetList, onAdd }) {
                         {processedDrillDownData.map((h, i) => {
                           const isPos = h.ret_pct >= 0;
                           return (
-                            <div key={i} className={`table-row ${i % 2 === 0 ? 'row-even' : ''}`} style={{ gridTemplateColumns: '2.5fr 1fr 1fr 1fr 1fr 1fr 1.2fr' }}>
+                            <div key={i} className={`table-row ${i % 2 === 0 ? 'row-even' : ''}`} style={{ gridTemplateColumns: 'minmax(0, 2.5fr) repeat(5, minmax(0, 1fr)) minmax(0, 1.2fr)' }}>
                               <span style={{ fontSize: '0.75rem', fontWeight: '600' }}>{h.symbol}</span>
                               <span>{h.quantity.toFixed(2)}</span>
-                              <span>₹{h.average_price.toFixed(2)}</span>
-                              <span>₹{(drillDownType === 'EQUITY' ? h.ltp : h.nav).toFixed(2)}</span>
-                              <span>₹{h.invested_value.toFixed(0)}</span>
-                              <span style={{ fontWeight: 600, color: 'var(--text)' }}>₹{h.current_value.toFixed(0)}</span>
+                              <span>{perUnit(h.average_price)}</span>
+                              <span>{perUnit(drillDownType === 'EQUITY' ? h.ltp : h.nav)}</span>
+                              <span>{rupees(h.invested_value)}</span>
+                              <span style={{ fontWeight: 600, color: 'var(--text)' }}>{rupees(h.current_value)}</span>
                               <span className={isPos ? 'pos' : 'neg'} style={{ display: 'flex', flexDirection: 'column', gap: '2px', justifyContent: 'center' }}>
-                                <span style={{ fontWeight: 700 }}>{isPos ? '+' : '-'}₹{Math.abs(h.current_value - h.invested_value).toFixed(0)}</span>
+                                <span style={{ fontWeight: 700 }}>{isPos ? '+' : '-'}{rupees(Math.abs(h.current_value - h.invested_value))}</span>
                                 <span style={{ fontSize: '0.75rem', opacity: 0.8 }}>({isPos ? '+' : '-'}{Math.abs(h.ret_pct).toFixed(2)}%)</span>
                               </span>
                             </div>
@@ -1820,7 +1851,7 @@ function InvestTab({ investments, manualAssets, assetList, onAdd }) {
                               <div>
                                 <div style={{ fontWeight: 700, fontSize: '1.05rem', color: 'var(--text)', lineHeight: 1.3 }}>{h.symbol}</div>
                                 <div style={{ fontSize: '0.8rem', color: 'var(--text3)', marginTop: '6px' }}>
-                                  {h.quantity.toFixed(2)} units • Avg: ₹{h.average_price.toFixed(2)} • {drillDownType === 'EQUITY' ? 'LTP' : 'NAV'}: ₹{(drillDownType === 'EQUITY' ? h.ltp : h.nav).toFixed(2)}
+                                  {h.quantity.toFixed(2)} units • Avg: {perUnit(h.average_price)} • {drillDownType === 'EQUITY' ? 'LTP' : 'NAV'}: {perUnit(drillDownType === 'EQUITY' ? h.ltp : h.nav)}
                                 </div>
                               </div>
                               <div className={isPos ? 'pos' : 'neg'} style={{ fontWeight: 700, fontSize: '0.85rem', background: isPos ? 'rgba(34, 197, 94, 0.1)' : 'rgba(239, 68, 68, 0.1)', padding: '0.3rem 0.6rem', borderRadius: '6px', whiteSpace: 'nowrap' }}>
@@ -1830,16 +1861,16 @@ function InvestTab({ investments, manualAssets, assetList, onAdd }) {
                             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '1rem', borderTop: '1px solid var(--border)', paddingTop: '1rem' }}>
                               <div>
                                 <div style={{ fontSize: '0.7rem', color: 'var(--text3)', textTransform: 'uppercase', fontWeight: 600 }}>Invested</div>
-                                <div style={{ fontWeight: 600, color: 'var(--text)', fontSize: '0.9rem', marginTop: '4px', whiteSpace: 'nowrap' }}>₹{h.invested_value.toFixed(0)}</div>
+                                <div style={{ fontWeight: 600, color: 'var(--text)', fontSize: '0.9rem', marginTop: '4px', whiteSpace: 'nowrap' }}>{rupees(h.invested_value)}</div>
                               </div>
                               <div>
                                 <div style={{ fontSize: '0.7rem', color: 'var(--text3)', textTransform: 'uppercase', fontWeight: 600 }}>Current</div>
-                                <div style={{ fontWeight: 700, color: 'var(--text)', fontSize: '0.9rem', marginTop: '4px', whiteSpace: 'nowrap' }}>₹{h.current_value.toFixed(0)}</div>
+                                <div style={{ fontWeight: 700, color: 'var(--text)', fontSize: '0.9rem', marginTop: '4px', whiteSpace: 'nowrap' }}>{rupees(h.current_value)}</div>
                               </div>
                               <div>
                                 <div style={{ fontSize: '0.7rem', color: 'var(--text3)', textTransform: 'uppercase', fontWeight: 600 }}>Return ₹</div>
                                 <div className={h.current_value >= h.invested_value ? 'pos' : 'neg'} style={{ fontWeight: 700, fontSize: '0.9rem', marginTop: '4px', whiteSpace: 'nowrap', display: 'flex', flexDirection: 'column' }}>
-                                  <span>{h.current_value >= h.invested_value ? '+' : '-'}₹{Math.abs(h.current_value - h.invested_value).toFixed(0)}</span>
+                                  <span>{h.current_value >= h.invested_value ? '+' : '-'}{rupees(Math.abs(h.current_value - h.invested_value))}</span>
                                 </div>
                               </div>
                             </div>
@@ -1847,7 +1878,8 @@ function InvestTab({ investments, manualAssets, assetList, onAdd }) {
                         );
                       })}
                     </div>
-                  )
+                  )}
+                  </>
                 )}
               </div>
             </div>
