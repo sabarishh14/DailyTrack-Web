@@ -35,6 +35,33 @@ function ReturnFigure({ amount, pct }) {
   );
 }
 
+// The server's times are India's, as is everyone using this.
+const clockTime = (d) => d.toLocaleTimeString('en-IN', { hour: 'numeric', minute: '2-digit' });
+const dayMonth = (d) => d.toLocaleDateString('en-IN', { day: 'numeric', month: 'short' });
+const sameDay = (a, b) => a.toDateString() === b.toDateString();
+
+/** "🕒 Stocks as of 3:29 pm": when the prices are from (Daily) or the last Kite sync (Manual). */
+function PriceTime({ times }) {
+  if (!times) return null;
+  let text = null;
+  if (times.mode === 'daily' && (times.stocks_at || times.checked_at)) {
+    const at = new Date(times.stocks_at || times.checked_at);
+    const when = sameDay(at, new Date()) ? clockTime(at) : `${dayMonth(at)}, ${clockTime(at)}`;
+    text = `${times.stocks_at ? 'Stocks as of' : 'Updated'} ${when}`;
+  } else if (times.mode === 'manual' && times.synced) {
+    text = `Kite synced ${dayMonth(new Date(`${times.synced}T00:00:00`))}`;
+  }
+  if (!text) return null;
+  return (
+    <div
+      title={times.stale ? "The market's open but the prices haven't moved: the price source isn't answering" : undefined}
+      style={{ fontSize: '0.75rem', fontWeight: 600, marginTop: '0.3rem', color: times.stale ? '#d97706' : 'var(--text3)', whiteSpace: 'nowrap' }}
+    >
+      🕒 {text}{times.stale && ' · not updating'}
+    </div>
+  );
+}
+
 function InvestTab({ investments, manualAssets, assetList, onAdd }) {
   const access = useAccess();
   const canEdit = access.can('invest', 'edit');
@@ -133,6 +160,16 @@ function InvestTab({ investments, manualAssets, assetList, onAdd }) {
       };
       fetchXirr();
     }
+  }, [isUnlocked, investments]);
+
+  // How fresh the prices are: on Daily, when the stocks' prices traded; on Manual, the last Kite sync.
+  const [priceTimes, setPriceTimes] = useState(null);
+  useEffect(() => {
+    if (!isUnlocked) return;
+    fetch(`${API}/investments/prices`, { headers: { 'Authorization': `Bearer ${getToken()}` } })
+      .then(r => (r.ok ? r.json() : null))
+      .then(setPriceTimes)
+      .catch(() => {});
   }, [isUnlocked, investments]);
 
   const handlePinSubmit = () => {
@@ -753,6 +790,7 @@ function InvestTab({ investments, manualAssets, assetList, onAdd }) {
                   <div style={{ fontFamily: "'Syne', sans-serif", fontSize: 'clamp(1.4rem, 7vw, 2.8rem)', fontWeight: 800, color: 'var(--text)', lineHeight: 1.2, marginTop: '0.2rem', whiteSpace: 'nowrap' }}>
                     {showBalances ? fmt(filteredTotals.curr) : '₹ ••••••'}
                   </div>
+                  <PriceTime times={priceTimes} />
                 </div>
                 <div style={{ display: 'flex', gap: '0.25rem', flexShrink: 0, marginTop: '-4px' }}>
                   <button

@@ -295,6 +295,25 @@ setAccounts([]);
     if (!canOpenTab(access, tab)) setTab(0);
   }, [access, tab]);
 
+  // Investments open: ask again now and then, and on coming back to the tab. On
+  // Daily the server reprices Kite's holdings when asked (at most every 30 minutes
+  // while the market's open), so an open page would otherwise never show it.
+  const investOpen = isLoggedIn && tab === 4 && access.can('invest');
+  useEffect(() => {
+    if (!investOpen) return undefined;
+    const refresh = () => {
+      if (document.visibilityState !== 'visible') return;
+      fetch(`${API}/investments`, { headers: { 'Authorization': `Bearer ${getToken()}` } })
+        .then(r => (r.ok ? r.json() : null))
+        .then(inv => { if (Array.isArray(inv)) setInvestments(prev => (JSON.stringify(prev) === JSON.stringify(inv) ? prev : inv)); })
+        .catch(() => {});
+    };
+    refresh();
+    const interval = setInterval(refresh, 5 * 60 * 1000);
+    document.addEventListener('visibilitychange', refresh);
+    return () => { clearInterval(interval); document.removeEventListener('visibilitychange', refresh); };
+  }, [investOpen]);
+
   // Keep Hugging Face Space awake while the tab is open!
   useEffect(() => {
     if (!isLoggedIn) return;

@@ -330,6 +330,7 @@ class UserSettings(db.Model):
     # Kite's holdings: 'manual' (worth changes with a sync) or 'daily' (repriced each day).
     kite_valuation = db.Column(db.String(10))
     kite_priced_at = db.Column(db.DateTime)   # IST, the last time they were repriced
+    kite_quoted_at = db.Column(db.DateTime)   # IST, when the latest stock price Yahoo gave traded
     updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 class DeviceToken(db.Model):
     """A phone that wants push alerts (low balance), per signed-in user."""

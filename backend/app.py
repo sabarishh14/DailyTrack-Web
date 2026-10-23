@@ -108,6 +108,7 @@ with app.app_context():
         db.session.execute(text("ALTER TABLE mf_holdings ADD COLUMN IF NOT EXISTS isin VARCHAR(12)"))
         db.session.execute(text("ALTER TABLE user_settings ADD COLUMN IF NOT EXISTS kite_valuation VARCHAR(10)"))
         db.session.execute(text("ALTER TABLE user_settings ADD COLUMN IF NOT EXISTS kite_priced_at TIMESTAMP"))
+        db.session.execute(text("ALTER TABLE user_settings ADD COLUMN IF NOT EXISTS kite_quoted_at TIMESTAMP"))
         # Running balances and account filters walk one person's account history in date order.
         db.session.execute(text("CREATE INDEX IF NOT EXISTS ix_transactions_owner_account_date_id ON transactions (owner_email, account, date, id)"))
         db.session.commit()

@@ -23,6 +23,12 @@ from models import EquityHolding, MutualFundHolding, PortfolioSnapshot, UserSett
 
 SYNCED = TODAY - timedelta(days=2)
 YAHOO = {"INFY.NS": 1600.0, "IDEA.BO": 7.5}
+TRADED = datetime(2026, 10, 23, 15, 29)   # when Yahoo's prices are from
+
+
+def quotes(tickers):
+    """Yahoo's answer: each known ticker's price and when it traded."""
+    return {t: (YAHOO[t], TRADED) for t in tickers if t in YAHOO}
 
 
 class KiteDailyCase(ApiCase):
@@ -33,7 +39,7 @@ class KiteDailyCase(ApiCase):
 
         def spark(tickers):
             self.asked.append(list(tickers))
-            return {t: YAHOO[t] for t in tickers if t in YAHOO}
+            return quotes(tickers)
         patch = mock.patch.object(kite_daily, "_spark", spark)
         patch.start()
         self.addCleanup(patch.stop)
@@ -159,6 +165,38 @@ class SyncTest(KiteDailyCase):
         self.assertEqual((snap["curr_stocks"], snap["curr_mf"]), (4950, 182.0))
 
 
+class PriceTimesTest(KiteDailyCase):
+    """What the Investments page says about how fresh the prices are."""
+
+    def times(self, now):
+        with mock.patch.object(kite_daily, "datetime", wraps=datetime) as clock:
+            clock.now.return_value = now
+            return self.ok("GET", "/api/investments/prices", OWNER)
+
+    def test_manual_shows_the_last_sync(self):
+        self.kite_synced(OWNER, SYNCED)
+        times = self.ok("GET", "/api/investments/prices", OWNER)
+        self.assertEqual((times["mode"], times["synced"], times["stocks_at"]), ("manual", SYNCED.isoformat(), None))
+
+    def test_daily_shows_when_the_stock_prices_traded(self):
+        self.kite_synced(OWNER, SYNCED)
+        self.daily()
+        self.ok("GET", "/api/investments", OWNER)
+        times = self.ok("GET", "/api/investments/prices", OWNER)
+        self.assertEqual((times["mode"], times["stocks_at"], times["synced"]), ("daily", TRADED.isoformat(), SYNCED.isoformat()))
+
+    def test_stale_when_yahoo_is_quiet_while_the_market_is_open(self):
+        self.kite_synced(OWNER, SYNCED)
+        self.daily()
+        with mock.patch.object(kite_daily, "_spark", lambda tickers: None):
+            self.ok("GET", "/api/investments", OWNER)     # funds priced, stocks not
+        monday = TODAY + timedelta(days=7 - TODAY.weekday())   # the next one, after the sync
+        noon = datetime(monday.year, monday.month, monday.day, 12, 0, tzinfo=funds_service.IST)
+        self.assertTrue(self.times(noon)["stale"])
+        self.assertFalse(self.times(noon - timedelta(days=1))["stale"])    # Sunday: no market
+        self.assertFalse(self.times(noon.replace(hour=18))["stale"])       # closed for the day
+
+
 class SettingsTest(KiteDailyCase):
     def test_manual_until_changed(self):
         self.assertEqual(self.ok("GET", "/api/auth/me", OWNER)["settings"]["kite_valuation"], "manual")
@@ -194,8 +232,9 @@ class PricesTest(unittest.TestCase):
     def test_nse_then_bse_then_without_the_series(self):
         self.assertEqual(kite_daily._tickers("IDEA-BE"), ["IDEA-BE.NS", "IDEA-BE.BO", "IDEA.NS", "IDEA.BO"])
         self.assertEqual(kite_daily._tickers("BAJAJ-AUTO"), ["BAJAJ-AUTO.NS", "BAJAJ-AUTO.BO"])
-        with mock.patch.object(kite_daily, "_spark", lambda tickers: {t: YAHOO[t] for t in tickers if t in YAHOO}):
-            self.assertEqual(kite_daily.stock_prices(["INFY", "IDEA-BE", "NOPE"]), {"INFY": 1600.0, "IDEA-BE": 7.5})
+        with mock.patch.object(kite_daily, "_spark", quotes):
+            self.assertEqual(kite_daily.stock_prices(["INFY", "IDEA-BE", "NOPE"]),
+                             ({"INFY": 1600.0, "IDEA-BE": 7.5}, TRADED))
 
     def test_stale_until_the_closing_prices_are_in(self):
         monday = datetime(2026, 10, 19, 10, 0)

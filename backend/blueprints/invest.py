@@ -582,6 +582,11 @@ def sync_kite_direct():
         traceback.print_exc()
         db.session.rollback()
         return jsonify({"success": False, "message": str(e)})
+@invest_bp.route('/api/investments/prices', methods=['GET'])
+@require_access("invest")
+def get_price_times():
+    """When the holdings' prices are from (Daily) or the last Kite sync (Manual)."""
+    return jsonify(kite_daily.price_times())
 @invest_bp.route('/api/investments/<date_str>/equity_holdings', methods=['GET'])
 @require_access("invest")
 def get_daily_equity_holdings(date_str):

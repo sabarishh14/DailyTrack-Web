@@ -26,6 +26,7 @@ PRICES_URL = "https://query1.finance.yahoo.com/v7/finance/spark"
 BATCH = 20                        # symbols Yahoo prices in one request
 MARKET_CLOSE = clock(15, 45)      # NSE closes at 15:30; its closing prices settle soon after
 REFRESH = timedelta(minutes=30)   # how old a day's prices may get while the market's open
+STALE_AFTER = timedelta(minutes=45)   # quotes older than this while it's open: Yahoo isn't answering
 
 
 def kite_mode(email=None):
@@ -48,27 +49,30 @@ def _tickers(symbol):
 
 
 def _spark(tickers):
-    """{ticker: last price} for those Yahoo knows; None when it can't be reached."""
+    """{ticker: (last price, when it traded, IST)} for those Yahoo knows; None
+    when it can't be reached (it turns some servers away)."""
     try:
         resp = requests.get(PRICES_URL, params={"symbols": ",".join(tickers), "range": "1d", "interval": "1d"},
                             timeout=15, headers={"User-Agent": "Mozilla/5.0"})
         resp.raise_for_status()
         results = resp.json()["spark"]["result"] or []
-    except (requests.RequestException, ValueError, KeyError, TypeError):
+    except (requests.RequestException, ValueError, KeyError, TypeError) as e:
+        print(f"⚠️ Yahoo gave no stock prices: {e!r}")
         return None
     prices = {}
     for result in results:
         meta = ((result.get("response") or [{}])[0] or {}).get("meta") or {}
-        price = meta.get("regularMarketPrice")
+        price, traded = meta.get("regularMarketPrice"), meta.get("regularMarketTime")
         if isinstance(price, (int, float)) and price > 0:
-            prices[result.get("symbol")] = float(price)
+            at = datetime.fromtimestamp(traded, IST).replace(tzinfo=None) if isinstance(traded, (int, float)) else None
+            prices[result.get("symbol")] = (float(price), at)
     return prices
 
 
 def stock_prices(symbols):
-    """{Kite symbol: last traded price} for the ones Yahoo knows. One it doesn't
-    (an SGB, a bond) keeps the price it had."""
-    prices = {}
+    """({Kite symbol: last traded price}, when the latest of them traded) for the
+    ones Yahoo knows. One it doesn't (an SGB, a bond) keeps the price it had."""
+    prices, latest = {}, None
     for attempt in range(4):
         asked = {}
         for symbol in symbols:
@@ -79,11 +83,13 @@ def stock_prices(symbols):
         for i in range(0, len(names), BATCH):
             found = _spark(names[i:i + BATCH])
             if found is None:
-                return prices     # offline: no point asking again
-            for ticker, price in found.items():
+                return prices, latest     # offline: no point asking again
+            for ticker, (price, at) in found.items():
                 for symbol in asked.get(ticker, ()):
                     prices[symbol] = price
-    return prices
+                if at and (latest is None or at > latest):
+                    latest = at
+    return prices, latest
 
 
 def _fund_nav(isin):
@@ -158,7 +164,7 @@ def reprice_if_due(now=None):
 
 
 def _reprice(owner, priced_at, today, equity, funds, now):
-    prices = stock_prices(sorted({e.symbol for e in equity})) if equity else {}
+    prices, quoted = stock_prices(sorted({e.symbol for e in equity})) if equity else ({}, None)
     isins = {f.id: f.isin or _fund_isin(f) for f in funds}
     navs = {f.id: _fund_nav(isins[f.id]) for f in funds}
     if not prices and not any(navs.values()):
@@ -190,4 +196,34 @@ def _reprice(owner, priced_at, today, equity, funds, now):
     db.session.flush()
     funds_service.recompute_snapshot(today)
     settings.kite_priced_at = now
+    if quoted:
+        settings.kite_quoted_at = quoted
     db.session.commit()
+
+
+def _market_open(now):
+    return now.weekday() < 5 and clock(9, 15) <= now.time() <= clock(15, 30)
+
+
+def price_times(now=None):
+    """What the Investments page says about prices: on Daily, when the stocks'
+    prices are from (stale when the market's open and they're well behind, as
+    when Yahoo turns the server away); on Manual, the last Kite sync."""
+    owner = data_owner()
+    settings = db.session.get(UserSettings, owner) if owner else None
+    mode = settings.kite_valuation if settings and settings.kite_valuation in MODES else "manual"
+    now = (now or datetime.now(IST)).replace(tzinfo=None)
+    synced = max((d for d in (
+        db.session.query(db.func.max(model.date))
+        .filter(model.owner_email == owner, model.repriced.is_(False)).scalar()
+        for model in (EquityHolding, MutualFundHolding)) if d is not None), default=None)
+    quoted = settings.kite_quoted_at if settings else None
+    day = funds_service.last_kite_day(now.date())
+    held = day is not None and EquityHolding.query.filter_by(date=day).first() is not None
+    return {
+        "mode": mode,
+        "synced": synced.isoformat() if synced else None,
+        "stocks_at": quoted.isoformat() if quoted and mode == "daily" else None,
+        "checked_at": settings.kite_priced_at.isoformat() if settings and settings.kite_priced_at and mode == "daily" else None,
+        "stale": bool(mode == "daily" and held and _market_open(now) and (quoted is None or now - quoted > STALE_AFTER)),
+    }
