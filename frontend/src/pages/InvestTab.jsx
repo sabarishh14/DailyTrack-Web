@@ -475,7 +475,7 @@ function InvestTab({ investments, manualAssets, assetList, onAdd }) {
     drillDownData.forEach(item => { mapA[item.symbol] = item; });
 
     const allSymbols = Array.from(new Set([...Object.keys(mapA), ...Object.keys(mapB)]));
-    return allSymbols.map(sym => {
+    const rows = allSymbols.map(sym => {
       const a = mapA[sym] || { quantity: 0, invested_value: 0, current_value: 0, average_price: 0, ltp: 0, nav: 0, ret_pct: 0 };
       const b = mapB[sym] || { quantity: 0, invested_value: 0, current_value: 0, average_price: 0, ltp: 0, nav: 0, ret_pct: 0 };
       const priceA = drillDownType === 'EQUITY' ? a.ltp : a.nav;
@@ -493,8 +493,26 @@ function InvestTab({ investments, manualAssets, assetList, onAdd }) {
         ret_pct_A: a.invested_value > 0 ? ((a.current_value - a.invested_value) / a.invested_value) * 100 : null,
         sort_val: a.current_value > 0 ? a.current_value : b.current_value
       };
-    }).sort((x, y) => y.sort_val - x.sort_val);
-  }, [drillDownData, drillDownCompareData, drillDownCompareDate, drillDownType]);
+    });
+    // The same columns sort as on its own. LTP/NAV sorts by the move, since
+    // prices of different holdings don't compare; one with no figure goes last.
+    const sortValue = (h) => {
+      switch (drillSortBy) {
+        case 'symbol': return h.symbol;
+        case 'quantity': return h.qty_A;
+        case 'price': return h.price_pct;
+        case 'invested_value': return h.inv_A;
+        case 'ret_pct': return h.ret_pct_A;
+        default: return h.sort_val;   // current value; an exited one's from before
+      }
+    };
+    return rows.sort((x, y) => {
+      const a = sortValue(x), b = sortValue(y);
+      if (a === null || b === null) return (a === null) - (b === null);
+      if (typeof a === 'string') return drillSortDir === 'asc' ? a.localeCompare(b) : b.localeCompare(a);
+      return drillSortDir === 'asc' ? a - b : b - a;
+    });
+  }, [drillDownData, drillDownCompareData, drillDownCompareDate, drillDownType, drillSortBy, drillSortDir]);
 
   // 🚀 COMPARISON SUMMARY TOTALS
   const comparisonSummary = useMemo(() => {
@@ -1688,13 +1706,19 @@ function InvestTab({ investments, manualAssets, assetList, onAdd }) {
                     {!isMobile ? (
                       <div style={{ width: '100%', overflowX: 'auto', WebkitOverflowScrolling: 'touch' }}>
                         <div className="data-table" style={{ minWidth: '850px' }}>
-                          <div className="table-header" style={{ gridTemplateColumns: COMPARE_COLUMNS, userSelect: 'none' }}>
-                            <span>Symbol</span>
-                            <span>Qty</span>
-                            <span>{drillDownType === 'EQUITY' ? 'LTP' : 'NAV'}</span>
-                            <span>Invested</span>
-                            <span>Current</span>
-                            <span>Returns</span>
+                          <div className="table-header" style={{ gridTemplateColumns: COMPARE_COLUMNS, cursor: 'pointer', userSelect: 'none' }}>
+                            {[
+                              ['symbol', 'Symbol'],
+                              ['quantity', 'Qty'],
+                              ['price', drillDownType === 'EQUITY' ? 'LTP' : 'NAV', `Sorts by the move since ${formatDate(drillDownCompareDate)}`],
+                              ['invested_value', 'Invested'],
+                              ['current_value', 'Current'],
+                              ['ret_pct', 'Returns'],
+                            ].map(([col, label, hint]) => (
+                              <span key={col} onClick={() => handleDrillSort(col)} title={hint}>
+                                {label} {drillSortBy === col && <span className="sort-indicator">{drillSortDir === 'asc' ? '↑' : '↓'}</span>}
+                              </span>
+                            ))}
                           </div>
                           {comparisonData.map((h, i) => {
                             const quiet = h.is_new || h.is_exited;   // its tag says what changed
