@@ -6,7 +6,7 @@ import { getAuth, signInWithPopup, GoogleAuthProvider, signOut } from 'firebase/
 import SabDekho from './SabDekho';
 
 import { API } from '../constants';
-import { getToken, formatDate, fmt } from '../utils';
+import { getToken, formatDate, fmt, fmtPct } from '../utils';
 import MultiAssetSelect from '../components/MultiAssetSelect';
 import CustomSelect from '../components/CustomSelect';
 import AddManualAssetModal from '../components/AddManualAssetModal';
@@ -14,6 +14,26 @@ import FundsModal from '../components/FundsModal';
 import EditManualAssetModal from '../components/EditManualAssetModal';
 import PinLockOverlay from './invest-components/PinLockOverlay';
 import { useAccess } from '../access/AccessContext';
+
+// ── A snapshot compared with another: each holding then, and what changed ──
+// minmax(0, …): every row is its own grid, so columns can't size to their content.
+const COMPARE_COLUMNS = 'minmax(0, 1.8fr) minmax(0, 0.7fr) minmax(0, 1.1fr) minmax(0, 1.1fr) minmax(0, 1.2fr) minmax(0, 1.6fr)';
+const STACK = { flexDirection: 'column', alignItems: 'flex-start', justifyContent: 'center', gap: '4px' };
+const rupees = (n) => '₹' + Math.round(n).toLocaleString('en-IN');
+const perUnit = (n) => '₹' + n.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+const units = (n) => n.toLocaleString('en-IN', { maximumFractionDigits: 3 });
+
+/** A holding's return in ₹ and, beside it, as a share of what went in. */
+function ReturnFigure({ amount, pct }) {
+  if (pct === null) return <span style={{ color: 'var(--text3)' }}>—</span>;
+  const up = amount >= 0;
+  return (
+    <span className={up ? 'pos' : 'neg'} style={{ fontWeight: 700, display: 'flex', flexWrap: 'wrap', alignItems: 'baseline', columnGap: '6px' }}>
+      <span style={{ whiteSpace: 'nowrap' }}>{up ? '+' : '-'}{rupees(Math.abs(amount))}</span>
+      <span style={{ fontSize: '0.75rem', fontWeight: 600, opacity: 0.85, whiteSpace: 'nowrap' }}>{fmtPct(pct)}</span>
+    </span>
+  );
+}
 
 function InvestTab({ investments, manualAssets, assetList, onAdd }) {
   const access = useAccess();
@@ -241,14 +261,19 @@ function InvestTab({ investments, manualAssets, assetList, onAdd }) {
   const [drillDownCompareData, setDrillDownCompareData] = useState([]);
   const [isCompareLoading, setIsCompareLoading] = useState(false);
 
-  // Reusable Diff Badge for the UI
-  const DiffBadge = ({ diff, isCurrency = true, isPct = false }) => {
-    if (!diff || Math.abs(diff) < 0.01) return <span style={{ fontSize: '0.65rem', color: 'var(--text3)' }}>= No Change</span>;
+  // A change between two snapshots: ▲ green or ▼ red. [pct] adds what it is as
+  // a share of before; [hideZero] shows nothing at all when nothing changed.
+  const DiffBadge = ({ diff, isCurrency = true, isPct = false, pct = null, hideZero = false, title }) => {
+    if (!diff || Math.abs(diff) < 0.01) return hideZero ? null : <span style={{ fontSize: '0.65rem', color: 'var(--text3)' }}>= No Change</span>;
     const isPos = diff > 0;
-    const formatted = isPct ? diff.toFixed(2) + '%' : (isCurrency ? '₹' + Math.abs(diff).toLocaleString('en-IN', { maximumFractionDigits: 2 }) : Math.abs(diff).toFixed(2));
+    const abs = Math.abs(diff);
+    const formatted = isPct ? abs.toFixed(2) + '%'
+      : isCurrency ? '₹' + abs.toLocaleString('en-IN', { maximumFractionDigits: abs >= 100 ? 0 : 2 })
+      : abs.toLocaleString('en-IN', { maximumFractionDigits: 3 });
     return (
-      <span className={isPos ? 'pos' : 'neg'} style={{ fontSize: '0.7rem', fontWeight: 700, display: 'flex', alignItems: 'center', gap: '2px', background: isPos ? 'rgba(52,211,153,0.1)' : 'rgba(248,113,113,0.1)', padding: '2px 6px', borderRadius: '4px', width: 'fit-content' }}>
+      <span className={isPos ? 'pos' : 'neg'} title={title} style={{ fontSize: '0.7rem', fontWeight: 700, display: 'flex', alignItems: 'center', gap: '4px', background: isPos ? 'rgba(52,211,153,0.1)' : 'rgba(248,113,113,0.1)', padding: '2px 6px', borderRadius: '4px', width: 'fit-content', whiteSpace: 'nowrap' }}>
         {isPos ? '▲' : '▼'} {formatted}
+        {pct !== null && Number.isFinite(pct) && <span style={{ fontWeight: 600, opacity: 0.8 }}>· {Math.abs(pct).toFixed(2)}%</span>}
       </span>
     );
   };
@@ -454,13 +479,17 @@ function InvestTab({ investments, manualAssets, assetList, onAdd }) {
       const b = mapB[sym] || { quantity: 0, invested_value: 0, current_value: 0, average_price: 0, ltp: 0, nav: 0, ret_pct: 0 };
       const priceA = drillDownType === 'EQUITY' ? a.ltp : a.nav;
       const priceB = drillDownType === 'EQUITY' ? b.ltp : b.nav;
+      const held = a.quantity > 0 && b.quantity > 0;
       return {
         symbol: sym,
         qty_A: a.quantity, qty_diff: a.quantity - b.quantity, is_new: b.quantity === 0 && a.quantity > 0, is_exited: a.quantity === 0 && b.quantity > 0,
-        price_A: priceA, price_diff: priceA - priceB,
+        price_A: priceA, price_diff: held ? priceA - priceB : 0,
+        // How much it moved: the price, so buying or selling some doesn't count.
+        price_pct: held && priceB > 0 ? ((priceA - priceB) / priceB) * 100 : null,
         inv_A: a.invested_value, inv_diff: a.invested_value - b.invested_value,
         curr_A: a.current_value, curr_diff: a.current_value - b.current_value,
         ret_A: a.current_value - a.invested_value, ret_diff: (a.current_value - a.invested_value) - (b.current_value - b.invested_value),
+        ret_pct_A: a.invested_value > 0 ? ((a.current_value - a.invested_value) / a.invested_value) * 100 : null,
         sort_val: a.current_value > 0 ? a.current_value : b.current_value
       };
     }).sort((x, y) => y.sort_val - x.sort_val);
@@ -1598,7 +1627,7 @@ function InvestTab({ investments, manualAssets, assetList, onAdd }) {
                       <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : 'repeat(3, 1fr)', gap: '0.75rem', marginBottom: '1.25rem' }}>
                         {[
                           { label: 'Invested', valA: comparisonSummary.inv_A, valB: comparisonSummary.inv_B, diff: comparisonSummary.inv_diff },
-                          { label: 'Current Value', valA: comparisonSummary.curr_A, valB: comparisonSummary.curr_B, diff: comparisonSummary.curr_diff },
+                          { label: 'Current Value', valA: comparisonSummary.curr_A, valB: comparisonSummary.curr_B, diff: comparisonSummary.curr_diff, diffPct: comparisonSummary.curr_B > 0 ? (comparisonSummary.curr_diff / comparisonSummary.curr_B) * 100 : null },
                           { label: 'Returns', valA: comparisonSummary.ret_A, valB: comparisonSummary.ret_B, diff: comparisonSummary.ret_diff, pctA: comparisonSummary.ret_pct_A, pctB: comparisonSummary.ret_pct_B },
                         ].map((card, ci) => (
                           <div key={ci} style={{ background: 'var(--bg2)', border: '1px solid var(--border)', borderRadius: '12px', padding: '1rem 1.25rem' }}>
@@ -1620,7 +1649,7 @@ function InvestTab({ investments, manualAssets, assetList, onAdd }) {
                               </div>
                             </div>
                             <div style={{ marginTop: '0.5rem', borderTop: '1px solid var(--border)', paddingTop: '0.5rem' }}>
-                              <DiffBadge diff={card.diff} isCurrency={true} />
+                              <DiffBadge diff={card.diff} isCurrency={true} pct={card.diffPct ?? null} />
                             </div>
                           </div>
                         ))}
@@ -1629,7 +1658,7 @@ function InvestTab({ investments, manualAssets, assetList, onAdd }) {
                     {comparisonSummary && (
                       <div style={{ display: 'flex', gap: '0.75rem', marginBottom: '1rem', flexWrap: 'wrap' }}>
                         <span style={{ fontSize: '0.75rem', color: 'var(--text3)', fontWeight: 600, fontFamily: "'DM Sans', sans-serif" }}>
-                          {comparisonSummary.total_stocks} {drillDownType === 'EQUITY' ? 'stocks' : 'funds'}
+                          {comparisonSummary.total_stocks} {drillDownType === 'EQUITY' ? 'stocks' : 'funds'} · ▲▼ since {formatDate(drillDownCompareDate)}
                         </span>
                         {comparisonSummary.stocks_new > 0 && <span style={{ fontSize: '0.7rem', background: 'rgba(52,211,153,0.1)', color: 'var(--pos)', padding: '2px 8px', borderRadius: '4px', fontWeight: 700 }}>+{comparisonSummary.stocks_new} New</span>}
                         {comparisonSummary.stocks_exited > 0 && <span style={{ fontSize: '0.7rem', background: 'rgba(248,113,113,0.1)', color: 'var(--neg)', padding: '2px 8px', borderRadius: '4px', fontWeight: 700 }}>{comparisonSummary.stocks_exited} Exited</span>}
@@ -1638,84 +1667,108 @@ function InvestTab({ investments, manualAssets, assetList, onAdd }) {
                     {!isMobile ? (
                       <div style={{ width: '100%', overflowX: 'auto', WebkitOverflowScrolling: 'touch' }}>
                         <div className="data-table" style={{ minWidth: '850px' }}>
-                          <div className="table-header" style={{ gridTemplateColumns: '2fr 1fr 1fr 1.2fr 1.2fr 1.2fr', userSelect: 'none' }}>
+                          <div className="table-header" style={{ gridTemplateColumns: COMPARE_COLUMNS, userSelect: 'none' }}>
                             <span>Symbol</span>
-                            <span>Qty Δ</span>
-                            <span>{drillDownType === 'EQUITY' ? 'LTP' : 'NAV'} Δ</span>
-                            <span>Invested Δ</span>
-                            <span>Current Δ</span>
-                            <span>Returns Δ</span>
+                            <span>Qty</span>
+                            <span>{drillDownType === 'EQUITY' ? 'LTP' : 'NAV'}</span>
+                            <span>Invested</span>
+                            <span>Current</span>
+                            <span>Returns</span>
                           </div>
-                          {comparisonData.map((h, i) => (
-                            <div key={i} className={`table-row ${i % 2 === 0 ? 'row-even' : ''}`} style={{ gridTemplateColumns: '2fr 1fr 1fr 1.2fr 1.2fr 1.2fr' }}>
-                              <span style={{ fontSize: '0.75rem', fontWeight: '600', flexDirection: 'column', alignItems: 'flex-start', justifyContent: 'center', gap: '4px' }}>
-                                <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                                  {h.symbol}
-                                  {h.is_new && <span style={{ background: 'var(--pos)', color: '#fff', fontSize: '0.55rem', padding: '2px 4px', borderRadius: '4px' }}>NEW</span>}
-                                  {h.is_exited && <span style={{ background: 'var(--neg)', color: '#fff', fontSize: '0.55rem', padding: '2px 4px', borderRadius: '4px' }}>EXITED</span>}
-                                </div>
-                              </span>
-                              <span style={{ flexDirection: 'column', alignItems: 'flex-start', justifyContent: 'center', gap: '4px' }}>
-                                <span>{h.qty_A.toFixed(2)}</span>
-                                <DiffBadge diff={h.qty_diff} isCurrency={false} />
-                              </span>
-                              <span style={{ flexDirection: 'column', alignItems: 'flex-start', justifyContent: 'center', gap: '4px' }}>
-                                <span>₹{h.price_A.toLocaleString('en-IN', { maximumFractionDigits: 2 })}</span>
-                                <DiffBadge diff={h.price_diff} isCurrency={true} />
-                              </span>
-                              <span style={{ flexDirection: 'column', alignItems: 'flex-start', justifyContent: 'center', gap: '4px' }}>
-                                <span>₹{h.inv_A.toLocaleString('en-IN', { maximumFractionDigits: 0 })}</span>
-                                <DiffBadge diff={h.inv_diff} isCurrency={true} />
-                              </span>
-                              <span style={{ flexDirection: 'column', alignItems: 'flex-start', justifyContent: 'center', gap: '4px' }}>
-                                <span style={{ fontWeight: 600, color: 'var(--text)' }}>₹{h.curr_A.toLocaleString('en-IN', { maximumFractionDigits: 0 })}</span>
-                                <DiffBadge diff={h.curr_diff} isCurrency={true} />
-                              </span>
-                              <span style={{ flexDirection: 'column', alignItems: 'flex-start', justifyContent: 'center', gap: '4px' }}>
-                                <span className={h.ret_A >= 0 ? 'pos' : 'neg'} style={{ fontWeight: 700 }}>{h.ret_A >= 0 ? '+' : '-'}₹{Math.abs(h.ret_A).toLocaleString('en-IN', { maximumFractionDigits: 0 })}</span>
-                                <DiffBadge diff={h.ret_diff} isCurrency={true} />
-                              </span>
-                            </div>
-                          ))}
+                          {comparisonData.map((h, i) => {
+                            const quiet = h.is_new || h.is_exited;   // its tag says what changed
+                            return (
+                              <div key={h.symbol} className={`table-row ${i % 2 === 0 ? 'row-even' : ''}`} style={{ gridTemplateColumns: COMPARE_COLUMNS }}>
+                                <span style={{ ...STACK, fontSize: '0.75rem', fontWeight: '600' }}>
+                                  <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap' }}>
+                                    {h.symbol}
+                                    {h.is_new && <span style={{ background: 'var(--pos)', color: '#fff', fontSize: '0.55rem', padding: '2px 4px', borderRadius: '4px' }}>NEW</span>}
+                                    {h.is_exited && <span style={{ background: 'var(--neg)', color: '#fff', fontSize: '0.55rem', padding: '2px 4px', borderRadius: '4px' }}>EXITED</span>}
+                                  </div>
+                                </span>
+                                <span style={STACK}>
+                                  <span>{units(h.qty_A)}</span>
+                                  {!quiet && <DiffBadge diff={h.qty_diff} isCurrency={false} hideZero />}
+                                </span>
+                                <span style={STACK}>
+                                  <span>{h.qty_A > 0 ? perUnit(h.price_A) : '—'}</span>
+                                  {h.price_pct !== null && (
+                                    <DiffBadge diff={h.price_pct} isPct hideZero
+                                      title={`${h.price_diff >= 0 ? '+' : '−'}${perUnit(Math.abs(h.price_diff))} since ${formatDate(drillDownCompareDate)}`} />
+                                  )}
+                                </span>
+                                <span style={STACK}>
+                                  <span>{rupees(h.inv_A)}</span>
+                                  {!quiet && <DiffBadge diff={h.inv_diff} hideZero />}
+                                </span>
+                                <span style={STACK}>
+                                  <span style={{ fontWeight: 600, color: 'var(--text)' }}>{rupees(h.curr_A)}</span>
+                                  {!quiet && <DiffBadge diff={h.curr_diff} hideZero />}
+                                </span>
+                                <span style={STACK}>
+                                  <ReturnFigure amount={h.ret_A} pct={h.ret_pct_A} />
+                                  {/* Only when money went in or out: otherwise it's the Current change again. */}
+                                  {!quiet && Math.abs(h.inv_diff) >= 0.01 && <DiffBadge diff={h.ret_diff} hideZero />}
+                                </span>
+                              </div>
+                            );
+                          })}
                         </div>
                       </div>
                     ) : (
                       <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
-                        {comparisonData.map((h, i) => {
+                        {comparisonData.map((h) => {
+                          const quiet = h.is_new || h.is_exited;   // its tag says what changed
                           const isPosRet = h.ret_A >= 0;
+                          const label = { fontSize: '0.7rem', color: 'var(--text3)', textTransform: 'uppercase', fontWeight: 600 };
+                          const figure = { fontWeight: 600, color: 'var(--text)', fontSize: '0.9rem', marginTop: '4px', whiteSpace: 'nowrap' };
                           return (
-                            <div key={i} style={{ background: 'var(--bg2)', border: '1px solid var(--border)', borderRadius: '12px', padding: '1.25rem', display: 'flex', flexDirection: 'column', gap: '1rem', transition: 'all 0.2s' }}>
+                            <div key={h.symbol} style={{ background: 'var(--bg2)', border: '1px solid var(--border)', borderRadius: '12px', padding: '1.25rem', display: 'flex', flexDirection: 'column', gap: '1rem', transition: 'all 0.2s' }}>
                               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '1rem' }}>
-                                <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap' }}>
-                                  <div style={{ fontWeight: 700, fontSize: '1.05rem', color: 'var(--text)', lineHeight: 1.3 }}>{h.symbol}</div>
-                                  {h.is_new && <span style={{ background: 'var(--pos)', color: '#fff', fontSize: '0.55rem', padding: '2px 4px', borderRadius: '4px' }}>NEW</span>}
-                                  {h.is_exited && <span style={{ background: 'var(--neg)', color: '#fff', fontSize: '0.55rem', padding: '2px 4px', borderRadius: '4px' }}>EXITED</span>}
+                                <div style={{ minWidth: 0 }}>
+                                  <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap' }}>
+                                    <div style={{ fontWeight: 700, fontSize: '1.05rem', color: 'var(--text)', lineHeight: 1.3 }}>{h.symbol}</div>
+                                    {h.is_new && <span style={{ background: 'var(--pos)', color: '#fff', fontSize: '0.55rem', padding: '2px 4px', borderRadius: '4px' }}>NEW</span>}
+                                    {h.is_exited && <span style={{ background: 'var(--neg)', color: '#fff', fontSize: '0.55rem', padding: '2px 4px', borderRadius: '4px' }}>EXITED</span>}
+                                  </div>
+                                  {h.qty_A > 0 && (
+                                    <div style={{ display: 'flex', alignItems: 'center', columnGap: '12px', rowGap: '6px', flexWrap: 'wrap', fontSize: '0.8rem', color: 'var(--text3)', marginTop: '6px' }}>
+                                      {/* Each figure keeps its change beside it when the line wraps. */}
+                                      <span style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', whiteSpace: 'nowrap' }}>
+                                        {units(h.qty_A)} units
+                                        {!quiet && <DiffBadge diff={h.qty_diff} isCurrency={false} hideZero />}
+                                      </span>
+                                      <span style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', whiteSpace: 'nowrap' }}>
+                                        {drillDownType === 'EQUITY' ? 'LTP' : 'NAV'}: {perUnit(h.price_A)}
+                                        {h.price_pct !== null && <DiffBadge diff={h.price_pct} isPct hideZero />}
+                                      </span>
+                                    </div>
+                                  )}
                                 </div>
-                                <div className={isPosRet ? 'pos' : 'neg'} style={{ fontWeight: 700, fontSize: '0.85rem', background: isPosRet ? 'rgba(34, 197, 94, 0.1)' : 'rgba(239, 68, 68, 0.1)', padding: '0.3rem 0.6rem', borderRadius: '6px', whiteSpace: 'nowrap' }}>
-                                  Ret: {isPosRet ? '+' : '-'}₹{Math.abs(h.ret_A).toLocaleString('en-IN', { maximumFractionDigits: 0 })}
-                                </div>
+                                {h.ret_pct_A !== null && (
+                                  <div className={isPosRet ? 'pos' : 'neg'} style={{ fontWeight: 700, fontSize: '0.85rem', background: isPosRet ? 'rgba(34, 197, 94, 0.1)' : 'rgba(239, 68, 68, 0.1)', padding: '0.3rem 0.6rem', borderRadius: '6px', whiteSpace: 'nowrap' }}>
+                                    {fmtPct(h.ret_pct_A)}
+                                  </div>
+                                )}
                               </div>
 
-                              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '1rem', borderTop: '1px solid var(--border)', paddingTop: '1rem' }}>
+                              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '1rem', borderTop: '1px solid var(--border)', paddingTop: '1rem' }}>
                                 <div>
-                                  <div style={{ fontSize: '0.7rem', color: 'var(--text3)', textTransform: 'uppercase', fontWeight: 600 }}>Quantity</div>
-                                  <div style={{ fontWeight: 600, color: 'var(--text)', fontSize: '0.9rem', marginTop: '4px' }}>{h.qty_A.toFixed(2)}</div>
-                                  <div style={{ marginTop: '4px' }}><DiffBadge diff={h.qty_diff} isCurrency={false} /></div>
+                                  <div style={label}>Invested</div>
+                                  <div style={figure}>{rupees(h.inv_A)}</div>
+                                  {!quiet && <div style={{ marginTop: '4px' }}><DiffBadge diff={h.inv_diff} hideZero /></div>}
                                 </div>
                                 <div>
-                                  <div style={{ fontSize: '0.7rem', color: 'var(--text3)', textTransform: 'uppercase', fontWeight: 600 }}>{drillDownType === 'EQUITY' ? 'LTP' : 'NAV'}</div>
-                                  <div style={{ fontWeight: 600, color: 'var(--text)', fontSize: '0.9rem', marginTop: '4px' }}>₹{h.price_A.toLocaleString('en-IN', { maximumFractionDigits: 2 })}</div>
-                                  <div style={{ marginTop: '4px' }}><DiffBadge diff={h.price_diff} isCurrency={true} /></div>
+                                  <div style={label}>Current</div>
+                                  <div style={{ ...figure, fontWeight: 700 }}>{rupees(h.curr_A)}</div>
+                                  {!quiet && <div style={{ marginTop: '4px' }}><DiffBadge diff={h.curr_diff} hideZero /></div>}
                                 </div>
                                 <div>
-                                  <div style={{ fontSize: '0.7rem', color: 'var(--text3)', textTransform: 'uppercase', fontWeight: 600 }}>Invested</div>
-                                  <div style={{ fontWeight: 600, color: 'var(--text)', fontSize: '0.9rem', marginTop: '4px' }}>₹{h.inv_A.toLocaleString('en-IN', { maximumFractionDigits: 0 })}</div>
-                                  <div style={{ marginTop: '4px' }}><DiffBadge diff={h.inv_diff} isCurrency={true} /></div>
-                                </div>
-                                <div>
-                                  <div style={{ fontSize: '0.7rem', color: 'var(--text3)', textTransform: 'uppercase', fontWeight: 600 }}>Current Val</div>
-                                  <div style={{ fontWeight: 700, color: 'var(--text)', fontSize: '0.9rem', marginTop: '4px' }}>₹{h.curr_A.toLocaleString('en-IN', { maximumFractionDigits: 0 })}</div>
-                                  <div style={{ marginTop: '4px' }}><DiffBadge diff={h.curr_diff} isCurrency={true} /></div>
+                                  <div style={label}>Return ₹</div>
+                                  <div className={isPosRet ? 'pos' : 'neg'} style={{ ...figure, color: undefined, fontWeight: 700 }}>
+                                    {h.ret_pct_A === null ? '—' : `${isPosRet ? '+' : '-'}${rupees(Math.abs(h.ret_A))}`}
+                                  </div>
+                                  {!quiet && Math.abs(h.inv_diff) >= 0.01 && <div style={{ marginTop: '4px' }}><DiffBadge diff={h.ret_diff} hideZero /></div>}
                                 </div>
                               </div>
                             </div>
