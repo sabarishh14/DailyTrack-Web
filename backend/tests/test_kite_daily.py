@@ -1,13 +1,13 @@
 """Kite's holdings repriced each day (kite_daily.py), on Daily in Settings: the
-last sync's holdings copied onto today at today's prices, until a real sync
-replaces them. No network: Yahoo's prices and AMFI's NAVs are stand-ins.
+last sync's holdings copied onto the day their prices are from, until a real
+sync replaces them. No network: Yahoo's prices and AMFI's NAVs are stand-ins.
 
     cd backend && python -m unittest tests.test_kite_daily
 """
 import os
 import sys
 import unittest
-from datetime import datetime, timedelta
+from datetime import date, datetime, time, timedelta
 from unittest import mock
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -21,7 +21,18 @@ from blueprints.auth import auth_bp  # noqa: E402
 from extensions import db  # noqa: E402
 from models import EquityHolding, MutualFundHolding, PortfolioSnapshot, UserSettings  # noqa: E402
 
-SYNCED = TODAY - timedelta(days=2)
+def weekday_before(day):
+    """The latest weekday before `day`: when markets last traded, give or take a holiday."""
+    day -= timedelta(days=1)
+    while day.weekday() >= 5:
+        day -= timedelta(days=1)
+    return day
+
+
+# Whatever day the tests run on, prices come from a weekday and the last real
+# sync is two trading days before it.
+TRADING_DAY = weekday_before(TODAY)
+SYNCED = weekday_before(weekday_before(TRADING_DAY))
 YAHOO = {"INFY.NS": 1600.0, "IDEA.BO": 7.5}
 TRADED = datetime(2026, 10, 23, 15, 29)   # when Yahoo's prices are from
 
@@ -36,10 +47,11 @@ class KiteDailyCase(ApiCase):
         super().setUp()
         self.app.register_blueprint(auth_bp)
         self.asked = []
+        self.traded = datetime.combine(TRADING_DAY, time(15, 29))   # when the stand-in prices traded
 
         def spark(tickers):
             self.asked.append(list(tickers))
-            return quotes(tickers)
+            return {t: (YAHOO[t], self.traded) for t in tickers if t in YAHOO}
         patch = mock.patch.object(kite_daily, "_spark", spark)
         patch.start()
         self.addCleanup(patch.stop)
@@ -47,25 +59,26 @@ class KiteDailyCase(ApiCase):
     def daily(self, who=OWNER):
         self.ok("PUT", "/api/me/settings", who, {"kite_valuation": "daily"})
 
-    def today(self, model, **filters):
-        return self.rows(model, date=TODAY, **filters)
+    def priced(self, model, day=TRADING_DAY):
+        """The rows repricing filed under `day`."""
+        return self.rows(model, date=day, repriced=True)
 
 
 class RepriceTest(KiteDailyCase):
     def test_manual_leaves_the_last_sync_alone(self):
         self.kite_synced(OWNER, SYNCED)
         self.ok("GET", "/api/investments", OWNER)
-        self.assertEqual((self.today(EquityHolding), self.today(MutualFundHolding), self.asked), ([], [], []))
+        self.assertEqual((self.rows(EquityHolding, repriced=True), self.asked), ([], []))
 
-    def test_daily_copies_the_last_sync_onto_today_at_todays_prices(self):
+    def test_daily_copies_the_last_sync_onto_the_day_its_prices_are_from(self):
         self.kite_synced(OWNER, SYNCED)
         self.daily()
         snap = self.ok("GET", "/api/investments", OWNER)[0]
-        self.assertEqual((snap["date"], snap["inv_stocks"], snap["curr_stocks"]), (TODAY.isoformat(), 2000, 3200))
+        self.assertEqual((snap["date"], snap["inv_stocks"], snap["curr_stocks"]), (TRADING_DAY.isoformat(), 2000, 3200))
         self.assertEqual((snap["inv_mf"], snap["curr_mf"]), (100, 90.0))     # 1 unit at AMFI's 90
-        stocks = self.ok("GET", f"/api/investments/{TODAY.isoformat()}/equity_holdings", OWNER)
+        stocks = self.ok("GET", f"/api/investments/{TRADING_DAY.isoformat()}/equity_holdings", OWNER)
         self.assertEqual([(s["symbol"], s["ltp"], s["quantity"]) for s in stocks], [("INFY", 1600.0, 2)])
-        fund = self.today(MutualFundHolding)[0]
+        fund = self.priced(MutualFundHolding)[0]
         self.assertEqual((fund.isin, fund.nav, fund.repriced), ("INF879O01027", 90.0, True))
         # The sync's own day is left as it was.
         self.assertEqual([e.ltp for e in self.rows(EquityHolding, date=SYNCED)], [1500])
@@ -76,16 +89,16 @@ class RepriceTest(KiteDailyCase):
         self.ok("GET", "/api/investments", OWNER)
         self.ok("GET", "/api/investments", OWNER)
         self.assertEqual(len(self.asked), 1)
-        self.assertEqual(len(self.today(EquityHolding)), 1)
+        self.assertEqual(len(self.priced(EquityHolding)), 1)
 
     def test_each_day_carries_on_from_the_last(self):
         self.kite_synced(OWNER, SYNCED)
         self.daily()
         self.ok("GET", "/api/investments", OWNER)
-        with self.app.app_context():   # that was yesterday's look; now today's
+        with self.app.app_context():   # that was the trading day before's look; now this one's
             for model in (EquityHolding, MutualFundHolding):
-                for row in model.query.filter_by(date=TODAY).all():
-                    row.date = TODAY - timedelta(days=1)
+                for row in model.query.filter_by(date=TRADING_DAY).all():
+                    row.date = weekday_before(TRADING_DAY)
             PortfolioSnapshot.query.delete()
             settings = db.session.get(UserSettings, OWNER)
             settings.kite_priced_at = settings.kite_priced_at - timedelta(days=1)
@@ -93,24 +106,24 @@ class RepriceTest(KiteDailyCase):
         YAHOO["INFY.NS"] = 1700.0
         self.addCleanup(YAHOO.__setitem__, "INFY.NS", 1600.0)
         snap = self.ok("GET", "/api/investments", OWNER)[0]
-        self.assertEqual((snap["date"], snap["curr_stocks"]), (TODAY.isoformat(), 3400))
+        self.assertEqual((snap["date"], snap["curr_stocks"]), (TRADING_DAY.isoformat(), 3400))
 
     def test_a_sync_today_stands(self):
         self.kite_synced(OWNER, TODAY)
         self.daily()
         self.ok("GET", "/api/investments", OWNER)
         self.assertEqual(self.asked, [])
-        self.assertEqual([e.repriced for e in self.today(EquityHolding)], [False])
+        self.assertEqual([e.repriced for e in self.rows(EquityHolding, date=TODAY)], [False])
 
     def test_nothing_priced_means_nothing_written(self):
         self.kite_synced(OWNER, SYNCED)
         self.daily()
         with mock.patch.object(kite_daily, "_spark", lambda tickers: None), \
-                mock.patch.object(kite_daily, "_fund_nav", lambda isin: None):
+                mock.patch.object(kite_daily, "_fund_quote", lambda isin: None):
             self.ok("GET", "/api/investments", OWNER)
-        self.assertEqual(self.today(EquityHolding), [])
+        self.assertEqual(self.rows(EquityHolding, repriced=True), [])
         self.ok("GET", "/api/investments", OWNER)     # back online: the next look does it
-        self.assertEqual([e.ltp for e in self.today(EquityHolding)], [1600.0])
+        self.assertEqual([e.ltp for e in self.priced(EquityHolding)], [1600.0])
 
     def test_a_stock_yahoo_doesnt_know_keeps_its_price(self):
         self.kite_synced(OWNER, SYNCED)
@@ -120,14 +133,68 @@ class RepriceTest(KiteDailyCase):
             db.session.commit()
         self.daily()
         self.ok("GET", "/api/investments", OWNER)
-        self.assertEqual(sorted((e.symbol, e.ltp) for e in self.today(EquityHolding)),
+        self.assertEqual(sorted((e.symbol, e.ltp) for e in self.priced(EquityHolding)),
                          [("INFY", 1600.0), ("SGBMAR28-GB", 7000)])
 
     def test_its_personal(self):
         self.kite_synced(OWNER, SYNCED)
         self.daily(who=FRIEND)
         self.ok("GET", "/api/investments", OWNER)
-        self.assertEqual(self.today(EquityHolding), [])
+        self.assertEqual(self.rows(EquityHolding, repriced=True), [])
+
+
+class TradingDayTest(KiteDailyCase):
+    """A record belongs to the day its prices traded: no flat copies of weekends
+    and holidays."""
+    def stocks_on(self, day):
+        return [(e.ltp, e.repriced) for e in self.rows(EquityHolding, date=day)]
+
+    def test_a_look_after_trading_updates_that_days_record(self):
+        self.kite_synced(OWNER, SYNCED)
+        self.daily()
+        self.ok("GET", "/api/investments", OWNER)    # today, with prices from the trading day before
+        self.assertEqual((self.stocks_on(TRADING_DAY), self.stocks_on(TODAY)), ([(1600.0, True)], []))
+        self.assertEqual([s.date for s in self.rows(PortfolioSnapshot)], [TRADING_DAY])
+
+    def test_the_close_updates_the_days_record_in_place(self):
+        self.kite_synced(OWNER, SYNCED)
+        self.daily()
+        self.traded = datetime.combine(TRADING_DAY, time(11, 0))
+        self.ok("GET", "/api/investments", OWNER)
+        with self.app.app_context():   # due again, and the market has closed since
+            settings = db.session.get(UserSettings, OWNER)
+            settings.kite_priced_at -= timedelta(days=1)
+            db.session.commit()
+        YAHOO["INFY.NS"] = 1650.0
+        self.addCleanup(YAHOO.__setitem__, "INFY.NS", 1600.0)
+        self.traded = datetime.combine(TRADING_DAY, time(15, 29))
+        self.ok("GET", "/api/investments", OWNER)
+        self.assertEqual((self.stocks_on(TRADING_DAY), self.stocks_on(TODAY)), ([(1650.0, True)], []))
+
+    def test_a_real_sync_that_day_stands(self):
+        self.kite_synced(OWNER, TRADING_DAY)
+        self.daily()
+        self.traded = datetime.combine(TRADING_DAY, time(15, 29))
+        self.ok("GET", "/api/investments", OWNER)
+        self.assertEqual((self.stocks_on(TRADING_DAY), self.stocks_on(TODAY)), ([(1500, False)], []))
+
+    def test_old_weekend_records_fold_into_their_friday(self):
+        friday = TODAY - timedelta(days=(TODAY.weekday() - 4) % 7 + 7)     # one at least a week ago
+        thursday, saturday, sunday = (friday + timedelta(days=n) for n in (-1, 1, 2))
+        with self.app.app_context():
+            db.session.add(EquityHolding(id=1, owner_email=OWNER, date=thursday, symbol="INFY", quantity=2,
+                                         average_price=1000, ltp=1500, invested_value=2000, current_value=3000))
+            for i, (day, ltp) in enumerate(((friday, 1550), (saturday, 1560), (sunday, 1570))):
+                db.session.add(EquityHolding(id=10 + i, owner_email=OWNER, date=day, symbol="INFY", quantity=2,
+                                             average_price=1000, ltp=ltp, invested_value=2000,
+                                             current_value=2 * ltp, repriced=True))
+                db.session.add(PortfolioSnapshot(id=20 + i, owner_email=OWNER, date=day, grand_total_curr=2 * ltp))
+            db.session.add(UserSettings(email=OWNER, kite_valuation="daily", kite_priced_at=datetime.now()))
+            db.session.commit()
+        with mock.patch.object(kite_daily, "_stale", lambda priced_at, now: False):
+            snaps = self.ok("GET", "/api/investments", OWNER)
+        self.assertEqual([(e.date, e.ltp) for e in self.rows(EquityHolding, repriced=True)], [(friday, 1570)])
+        self.assertEqual([(s["date"], s["curr_stocks"]) for s in snaps], [(friday.isoformat(), 3140)])
 
 
 class SyncTest(KiteDailyCase):
@@ -157,9 +224,9 @@ class SyncTest(KiteDailyCase):
         with self.kite():
             result = self.ok("POST", "/api/sync/kite", OWNER, {"request_token": "r"})
         self.assertTrue(result["success"], result)
-        stocks = self.today(EquityHolding)
+        stocks = self.rows(EquityHolding, date=TODAY)
         self.assertEqual([(e.quantity, e.ltp, e.repriced) for e in stocks], [(3, 1650, False)])
-        funds = self.today(MutualFundHolding)
+        funds = self.rows(MutualFundHolding, date=TODAY)
         self.assertEqual([(f.quantity, f.isin, f.repriced) for f in funds], [(2, "INF879O01027", False)])
         snap = self.ok("GET", "/api/investments", OWNER)[0]
         self.assertEqual((snap["curr_stocks"], snap["curr_mf"]), (4950, 182.0))
@@ -183,7 +250,7 @@ class PriceTimesTest(KiteDailyCase):
         self.daily()
         self.ok("GET", "/api/investments", OWNER)
         times = self.ok("GET", "/api/investments/prices", OWNER)
-        self.assertEqual((times["mode"], times["stocks_at"], times["synced"]), ("daily", TRADED.isoformat(), SYNCED.isoformat()))
+        self.assertEqual((times["mode"], times["stocks_at"], times["synced"]), ("daily", self.traded.isoformat(), SYNCED.isoformat()))
 
     def test_stale_when_yahoo_is_quiet_while_the_market_is_open(self):
         self.kite_synced(OWNER, SYNCED)
@@ -225,7 +292,7 @@ class FundIsinTest(KiteDailyCase):
                 db.session.commit()
             self.daily()
             self.ok("GET", "/api/investments", OWNER)
-        self.assertEqual([(f.isin, f.nav) for f in self.today(MutualFundHolding)], [("INF879O01019", 81.0)])
+        self.assertEqual([(f.isin, f.nav) for f in self.rows(MutualFundHolding, repriced=True)], [("INF879O01019", 81.0)])
 
 
 class PricesTest(unittest.TestCase):

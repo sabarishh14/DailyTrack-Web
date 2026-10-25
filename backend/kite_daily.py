@@ -7,6 +7,10 @@ day it's repriced: stocks at the market's price (Yahoo Finance's, unofficial and
 free), funds at AMFI's NAV (funds_service). Those days' rows are marked
 `repriced`, and a real sync that day replaces them. On Manual (the default) a
 day's worth changes only with a sync, as it always has.
+
+A repriced record is filed under the day its prices are from, not the day they
+were looked up: on a weekend or a holiday the market's last close updates that
+trading day's record, so the history has no flat copies of days nothing traded.
 """
 import bisect
 import re
@@ -18,7 +22,7 @@ import requests
 import funds_service
 from extensions import db
 from funds_service import IST, NavUnavailable
-from models import EquityHolding, MutualFundHolding, UserSettings
+from models import EquityHolding, FundValue, MutualFundHolding, PortfolioSnapshot, UserSettings
 from tenancy import data_owner
 
 MODES = ("manual", "daily")
@@ -92,12 +96,18 @@ def stock_prices(symbols):
     return prices, latest
 
 
-def _fund_nav(isin):
+def _fund_quote(isin):
+    """(NAV, the day it's for) from AMFI, or None."""
     try:
         scheme = funds_service.scheme_for(isin=isin) if isin else None
     except NavUnavailable:
         return None
-    return scheme["nav"] if scheme else None
+    return (scheme["nav"], scheme["date"]) if scheme else None
+
+
+def _newer_nav(fund):
+    quote = _fund_quote(fund.isin)
+    return quote is not None and quote[0] != fund.nav
 
 
 def _fund_isin(holding):
@@ -137,68 +147,111 @@ def _stale(priced_at, now):
 
 
 def reprice_if_due(now=None):
-    """On Daily, the first look each day copies the last sync's holdings onto
-    today at today's prices; later looks reprice them until the market's closing
-    prices are in, and when AMFI publishes newer NAVs. Never stops the page loading."""
+    """On Daily, the first look each day reprices the last sync's holdings; later
+    looks again until the market's closing prices are in, and when AMFI publishes
+    newer NAVs. Never stops the page loading."""
     owner = data_owner()
     settings = db.session.get(UserSettings, owner) if owner else None
-    if settings is None or settings.kite_valuation != "daily":
+    if settings is None:
         return
     now = (now or datetime.now(IST)).replace(tzinfo=None)
     today, priced_at = now.date(), settings.kite_priced_at
     try:
+        if priced_at is not None:
+            _fold_weekends(today)
+        if settings.kite_valuation != "daily":
+            return
         day = funds_service.last_kite_day(today)
         if day is None:
             return        # never synced Kite
         equity = EquityHolding.query.filter_by(date=day).all()
         funds = MutualFundHolding.query.filter_by(date=day).all()
-        if day == today:
-            if not all(h.repriced for h in equity + funds):
-                return    # synced today: Kite's own prices stand
-            if not _stale(priced_at, now) and not any((_fund_nav(f.isin) or f.nav) != f.nav for f in funds):
-                return
-        _reprice(owner, priced_at, today, equity, funds, now)
+        if day == today and not all(h.repriced for h in equity + funds):
+            return        # synced today: Kite's own prices stand
+        if not _stale(priced_at, now) and not any(_newer_nav(f) for f in funds):
+            return
+        _reprice(owner, priced_at, day, equity, funds, now)
     except Exception as e:   # a bad answer from Yahoo or AMFI: next look tries again
         db.session.rollback()
         print(f"⚠️ Couldn't reprice Kite holdings: {e!r}")
 
 
-def _reprice(owner, priced_at, today, equity, funds, now):
+def _reprice(owner, priced_at, day, equity, funds, now):
+    """Prices the holdings last on `day` and files them under the day those prices
+    are from: today while the market trades; on a weekend or a holiday its last
+    trading day, whose record they bring up to the close."""
     prices, quoted = stock_prices(sorted({e.symbol for e in equity})) if equity else ({}, None)
     isins = {f.id: f.isin or _fund_isin(f) for f in funds}
-    navs = {f.id: _fund_nav(isins[f.id]) for f in funds}
-    if not prices and not any(navs.values()):
+    quotes = {f.id: _fund_quote(isins[f.id]) for f in funds}
+    if not prices and not any(quotes.values()):
         return            # nothing could be priced (offline): next look tries again
+    # Stocks say when the market last traded; with none, the funds' NAV day does.
+    priced_on = min(quoted.date() if quoted else max(q[1] for q in quotes.values() if q), now.date())
+    if priced_on < day or (priced_on == day and not all(h.repriced for h in equity + funds)):
+        target = None     # what's held there is newer, or Kite's own: it stands
+    else:
+        target = priced_on
 
     base = int(time.time() * 1000) * 1000   # clear of the ids a sync picks (milliseconds, plus a little)
     rows = []
-    for e in equity:
+    for e in equity if target else ():
         ltp = prices.get(e.symbol, e.ltp)
         rows.append(EquityHolding(
-            id=base + len(rows), date=today, symbol=e.symbol, quantity=e.quantity, average_price=e.average_price,
+            id=base + len(rows), date=target, symbol=e.symbol, quantity=e.quantity, average_price=e.average_price,
             ltp=ltp, invested_value=e.invested_value, current_value=e.quantity * ltp, repriced=True))
-    for f in funds:
-        nav = navs[f.id] or f.nav
+    for f in funds if target else ():
+        nav = quotes[f.id][0] if quotes[f.id] else f.nav
         rows.append(MutualFundHolding(
-            id=base + len(rows), date=today, symbol=f.symbol, isin=isins[f.id], quantity=f.quantity,
+            id=base + len(rows), date=target, symbol=f.symbol, isin=isins[f.id], quantity=f.quantity,
             average_price=f.average_price, nav=nav, invested_value=f.invested_value,
             current_value=f.quantity * nav, repriced=True))
 
     # The prices were fetched unlocked, so another request may have stored
-    # today's meanwhile: only the first to take the lock writes.
+    # them meanwhile: only the first to take the lock writes.
     settings = UserSettings.query.filter_by(email=owner).populate_existing().with_for_update().first()
     if settings.kite_priced_at != priced_at:
         db.session.rollback()
         return
-    EquityHolding.query.filter_by(date=today, repriced=True).delete(synchronize_session=False)
-    MutualFundHolding.query.filter_by(date=today, repriced=True).delete(synchronize_session=False)
-    db.session.add_all(rows)
-    db.session.flush()
-    funds_service.recompute_snapshot(today)
+    if target:
+        EquityHolding.query.filter_by(date=target, repriced=True).delete(synchronize_session=False)
+        MutualFundHolding.query.filter_by(date=target, repriced=True).delete(synchronize_session=False)
+        db.session.add_all(rows)
+        db.session.flush()
+        funds_service.recompute_snapshot(target)
     settings.kite_priced_at = now
     if quoted:
         settings.kite_quoted_at = quoted
     db.session.commit()
+
+
+def _fold_weekends(today):
+    """Repricing once filed weekends as days of their own: flat copies of Friday's
+    close. Each folds into its Friday (the latest prices win), or goes when a real
+    sync since stands. Once done there's nothing left to find."""
+    since = today - timedelta(days=120)
+    days = set()
+    for model in (EquityHolding, MutualFundHolding):
+        days |= {d for (d,) in db.session.query(model.date)
+                 .filter(model.repriced.is_(True), model.date >= since).distinct()}
+    weekend = sorted(d for d in days if d.weekday() >= 5)
+    for d in weekend:
+        friday = d - timedelta(days=d.weekday() - 4)
+        synced_since = any(model.query.filter(model.date >= friday, model.date < d, model.repriced.is_(False)).first()
+                           for model in (EquityHolding, MutualFundHolding))
+        for model in (EquityHolding, MutualFundHolding):
+            if not synced_since:
+                model.query.filter_by(date=friday, repriced=True).delete(synchronize_session=False)
+                model.query.filter_by(date=d, repriced=True).update({"date": friday}, synchronize_session=False)
+            else:
+                model.query.filter_by(date=d, repriced=True).delete(synchronize_session=False)
+        db.session.flush()
+        if FundValue.query.filter_by(date=d).first():
+            funds_service.recompute_snapshot(d)     # its own funds' day stays, beside Friday's holdings
+        else:
+            PortfolioSnapshot.query.filter_by(date=d).delete(synchronize_session=False)
+        funds_service.recompute_snapshot(friday)
+    if weekend:
+        db.session.commit()
 
 
 def _market_open(now):
