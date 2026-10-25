@@ -6379,6 +6379,35 @@ input[type="date"]::-webkit-calendar-picker-indicator {
   font-weight: 600;
 }
 
+/* ─── Investments: deleting a snapshot (InvestTab's SnapshotDelete) ─── */
+.snap-del {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  flex-shrink: 0;
+  border: none;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--text3);
+  cursor: pointer;
+  transition: opacity 0.15s, color 0.15s, background 0.15s;
+}
+
+.snap-del:hover,
+.snap-del:focus-visible {
+  color: var(--neg);
+  background: rgba(248, 113, 113, 0.12);
+}
+
+/* In the table it shows on the row's hover; touch screens always show it. */
+@media (hover: hover) {
+  .table-row .snap-del { opacity: 0; }
+  .table-row:hover .snap-del,
+  .table-row .snap-del:focus-visible { opacity: 1; }
+}
+
 /* ─── FINESSE: bars grow in, the busiest stands out, every bar is a link ─── */
 .stats-grow {
   transform-origin: bottom;

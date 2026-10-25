@@ -264,6 +264,28 @@ class PriceTimesTest(KiteDailyCase):
         self.assertFalse(self.times(noon.replace(hour=18))["stale"])       # closed for the day
 
 
+class SnapshotDeleteTest(KiteDailyCase):
+    """Deleting a day's snapshot: its totals and the holdings behind them."""
+
+    def setUp(self):
+        super().setUp()
+        self.kite_synced(OWNER, SYNCED)
+        with self.app.app_context():
+            for i, (who, day) in enumerate(((OWNER, SYNCED), (OWNER, TRADING_DAY), (FRIEND, SYNCED))):
+                db.session.add(PortfolioSnapshot(id=50 + i, owner_email=who, date=day, grand_total_curr=1))
+            db.session.commit()
+
+    def test_the_day_and_its_holdings_go(self):
+        self.ok("DELETE", f"/api/investments/{SYNCED.isoformat()}", OWNER)
+        self.assertEqual([s["date"] for s in self.ok("GET", "/api/investments", OWNER)], [TRADING_DAY.isoformat()])
+        self.assertEqual((self.rows(EquityHolding, date=SYNCED), self.rows(MutualFundHolding, date=SYNCED)), ([], []))
+        self.assertEqual(len(self.rows(PortfolioSnapshot, owner_email=FRIEND)), 1)    # theirs is theirs
+
+    def test_a_day_without_one_or_not_a_day(self):
+        self.assertEqual(self.call("DELETE", f"/api/investments/{TODAY.isoformat()}", OWNER).status_code, 404)
+        self.assertEqual(self.call("DELETE", "/api/investments/someday", OWNER).status_code, 400)
+
+
 class SettingsTest(KiteDailyCase):
     def test_manual_until_changed(self):
         self.assertEqual(self.ok("GET", "/api/auth/me", OWNER)["settings"]["kite_valuation"], "manual")

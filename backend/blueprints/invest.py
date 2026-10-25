@@ -582,6 +582,22 @@ def sync_kite_direct():
         traceback.print_exc()
         db.session.rollback()
         return jsonify({"success": False, "message": str(e)})
+@invest_bp.route('/api/investments/<date_str>', methods=['DELETE'])
+@require_access("invest")
+def delete_snapshot(date_str):
+    """Forgets one day: its totals and the holdings behind them (Kite's, synced or
+    repriced, and the values of funds held outside it). While that day is still
+    being priced (today, on Daily or with funds), a later look builds it again."""
+    try:
+        day = datetime.strptime(date_str, '%Y-%m-%d').date()
+    except ValueError:
+        return jsonify({"success": False, "message": "That isn't a date"}), 400
+    if not PortfolioSnapshot.query.filter_by(date=day).first():
+        return jsonify({"success": False, "message": "No snapshot that day"}), 404
+    for model in (PortfolioSnapshot, EquityHolding, MutualFundHolding, FundValue):
+        model.query.filter_by(date=day).delete(synchronize_session=False)
+    db.session.commit()
+    return jsonify({"success": True})
 @invest_bp.route('/api/investments/prices', methods=['GET'])
 @require_access("invest")
 def get_price_times():

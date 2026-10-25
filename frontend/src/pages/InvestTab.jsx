@@ -62,6 +62,23 @@ function PriceTime({ times }) {
   );
 }
 
+/** Deletes one day's snapshot (in the list of snapshots); FundsModal's trash outline. */
+function SnapshotDelete({ date, onDelete }) {
+  return (
+    <button
+      type="button"
+      className="snap-del"
+      onClick={e => { e.stopPropagation(); onDelete(date); }}
+      aria-label={`Delete the snapshot of ${formatDate(date)}`}
+      title="Delete this snapshot"
+    >
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+        <path d="M4 7h16M10 11v6M14 11v6" /><path d="m5 7 1 12a2 2 0 0 0 2 2h8a2 2 0 0 0 2-2l1-12M9 7V4h6v3" />
+      </svg>
+    </button>
+  );
+}
+
 function InvestTab({ investments, manualAssets, assetList, onAdd }) {
   const access = useAccess();
   const canEdit = access.can('invest', 'edit');
@@ -277,6 +294,18 @@ function InvestTab({ investments, manualAssets, assetList, onAdd }) {
     window.addEventListener('resize', handleResize);
     return () => window.removeEventListener('resize', handleResize);
   }, []);
+
+  // A day's snapshot, with the holdings behind it.
+  const handleDeleteSnapshot = async (dateStr) => {
+    if (!window.confirm(`Delete the snapshot of ${formatDate(dateStr)}? Its holdings go with it.`)) return;
+    try {
+      const res = await fetch(`${API}/investments/${dateStr}`, { method: 'DELETE', headers: { 'Authorization': `Bearer ${getToken()}` } });
+      const data = await res.json();
+      if (!data.success) throw new Error(data.message || "Couldn't delete");
+      drilldownCache.current = {};
+      onAdd();
+    } catch (e) { alert(`Couldn't delete: ${e.message}`); }
+  };
 
   const handleDeleteManualAsset = async (id) => {
     if (!window.confirm("Are you sure you want to delete this asset?")) return;
@@ -718,6 +747,8 @@ function InvestTab({ investments, manualAssets, assetList, onAdd }) {
   };
 
   const invTotalPages = Math.ceil(processedData.length / invRowsPerPage);
+  // Those who can edit get a narrow last column to delete a snapshot from.
+  const snapshotColumns = canEdit ? '1.2fr 1.5fr 1.5fr 1.5fr 56px' : '1.2fr 1.5fr 1.5fr 1.5fr';
   const invPaginatedRows = processedData.slice(invCurrentPage * invRowsPerPage, (invCurrentPage + 1) * invRowsPerPage);
   useEffect(() => { setInvCurrentPage(0); }, [filterMonth, sortBy, sortDir, viewMode]);
 
@@ -1360,11 +1391,12 @@ function InvestTab({ investments, manualAssets, assetList, onAdd }) {
                           /* 🖥️ DESKTOP: Classic Data Table */
                           <div style={{ width: '100%', overflowX: 'auto', WebkitOverflowScrolling: 'touch', paddingBottom: '8px' }}>
                             <div className="data-table" style={{ minWidth: '750px' }}>
-                              <div className="table-header" style={{ cursor: 'pointer', userSelect: 'none', gridTemplateColumns: '1.2fr 1.5fr 1.5fr 1.5fr' }}>
+                              <div className="table-header" style={{ cursor: 'pointer', userSelect: 'none', gridTemplateColumns: snapshotColumns }}>
                                 <span onClick={() => handleSort('date')}>SYNC DATE {sortBy === 'date' && <span className="sort-indicator">{sortDir === 'asc' ? '↑' : '↓'}</span>}</span>
                                 <span onClick={() => handleSort('inv')}>TOTAL INV {sortBy === 'inv' && <span className="sort-indicator">{sortDir === 'asc' ? '↑' : '↓'}</span>}</span>
                                 <span onClick={() => handleSort('curr')}>TOTAL CURR {sortBy === 'curr' && <span className="sort-indicator">{sortDir === 'asc' ? '↑' : '↓'}</span>}</span>
                                 <span onClick={() => handleSort('ret_amount')}>RETURNS {sortBy === 'ret_amount' && <span className="sort-indicator">{sortDir === 'asc' ? '↑' : '↓'}</span>}</span>
+                                {canEdit && <span />}
                               </div>
                               {invPaginatedRows && invPaginatedRows.length > 0 ? invPaginatedRows.map((inv, i) => {
                                 const broker_inv = (parseFloat(inv.inv_stocks) || 0) + (parseFloat(inv.inv_mf) || 0);
@@ -1376,7 +1408,7 @@ function InvestTab({ investments, manualAssets, assetList, onAdd }) {
                                     key={i}
                                     className={`table-row ${i % 2 === 0 ? 'row-even' : ''}`}
                                     onClick={() => openDrillDown(inv.date.split('T')[0])}
-                                    style={{ cursor: 'pointer', gridTemplateColumns: '1.2fr 1.5fr 1.5fr 1.5fr', transition: 'background 0.2s' }}
+                                    style={{ cursor: 'pointer', gridTemplateColumns: snapshotColumns, transition: 'background 0.2s' }}
                                     onMouseEnter={e => e.currentTarget.style.background = 'rgba(99,102,241,0.08)'}
                                     onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
                                     title="Click to view split"
@@ -1392,6 +1424,11 @@ function InvestTab({ investments, manualAssets, assetList, onAdd }) {
                                       <span style={{ fontWeight: 700 }}>{showBalances ? (ret >= 0 ? '+' : '-') + fmt(Math.abs(ret)) : '₹ ••••••'}</span>
                                       <span style={{ fontSize: '0.75rem', opacity: 0.8 }}>({broker_ret_pct >= 0 ? '+' : '-'}{Math.abs(broker_ret_pct).toFixed(2)}%)</span>
                                     </span>
+                                    {canEdit && (
+                                      <span style={{ padding: '0 0.75rem', justifyContent: 'flex-end' }}>
+                                        <SnapshotDelete date={inv.date.split('T')[0]} onDelete={handleDeleteSnapshot} />
+                                      </span>
+                                    )}
                                   </div>
                                 );
                               }) : <div className="empty-state">No brokerage snapshots match your filters.</div>}
@@ -1420,6 +1457,7 @@ function InvestTab({ investments, manualAssets, assetList, onAdd }) {
                                       <span style={{ fontWeight: 700, fontSize: '1.05rem', color: 'var(--text)' }}>{formatDate(inv.date)}</span>
                                       <span style={{ background: 'var(--bg3)', padding: '0.2rem 0.5rem', borderRadius: '6px', fontSize: '0.7rem', fontWeight: 700, color: 'var(--text2)', textTransform: 'uppercase' }}>Market Sync</span>
                                     </div>
+                                    {canEdit && <SnapshotDelete date={inv.date.split('T')[0]} onDelete={handleDeleteSnapshot} />}
                                   </div>
                                   {/* Metrics Grid */}
                                   <div style={{ display: 'flex', flexWrap: 'wrap', gap: '1rem', rowGap: '1.25rem' }}>
