@@ -30,7 +30,8 @@ PRICES_URL = "https://query1.finance.yahoo.com/v7/finance/spark"
 BATCH = 20                        # symbols Yahoo prices in one request
 MARKET_CLOSE = clock(15, 45)      # NSE closes at 15:30; its closing prices settle soon after
 REFRESH = timedelta(minutes=30)   # how old a day's prices may get while the market's open
-STALE_AFTER = timedelta(minutes=45)   # quotes older than this while it's open: Yahoo isn't answering
+STALE_AFTER = timedelta(minutes=45)
+FRESH_AFTER = timedelta(minutes=1)    # a refresh by hand reprices if the last was longer ago   # quotes older than this while it's open: Yahoo isn't answering
 
 
 def kite_mode(email=None):
@@ -146,10 +147,11 @@ def _stale(priced_at, now):
     return now - priced_at >= REFRESH
 
 
-def reprice_if_due(now=None):
+def reprice_if_due(now=None, fresh=False):
     """On Daily, the first look each day reprices the last sync's holdings; later
     looks again until the market's closing prices are in, and when AMFI publishes
-    newer NAVs. Never stops the page loading."""
+    newer NAVs. `fresh` (a refresh by hand) reprices now, unless it just did.
+    Never stops the page loading."""
     owner = data_owner()
     settings = db.session.get(UserSettings, owner) if owner else None
     if settings is None:
@@ -168,7 +170,10 @@ def reprice_if_due(now=None):
         funds = MutualFundHolding.query.filter_by(date=day).all()
         if day == today and not all(h.repriced for h in equity + funds):
             return        # synced today: Kite's own prices stand
-        if not _stale(priced_at, now) and not any(_newer_nav(f) for f in funds):
+        if fresh and funds:
+            funds_service.latest_navs(funds_service.FRESH_NAV_SECONDS)
+        asked = fresh and (priced_at is None or now - priced_at >= FRESH_AFTER)
+        if not asked and not _stale(priced_at, now) and not any(_newer_nav(f) for f in funds):
             return
         _reprice(owner, priced_at, day, equity, funds, now)
     except Exception as e:   # a bad answer from Yahoo or AMFI: next look tries again

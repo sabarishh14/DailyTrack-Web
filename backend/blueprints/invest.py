@@ -178,9 +178,11 @@ def get_portfolio_xirr():
 def get_investments():
     # The first look each day values funds held outside Kite and adds due SIPs,
     # reprices Kite's holdings (on Daily), and brings RDs up to date: the phone
-    # never calls the cron above.
-    kite_daily.reprice_if_due()
-    funds_service.refresh_if_due()
+    # never calls the cron above. ?refresh=1 (a refresh by hand) asks for
+    # prices and NAVs now.
+    fresh = request.args.get('refresh') == '1'
+    kite_daily.reprice_if_due(fresh=fresh)
+    funds_service.refresh_if_due(fresh=fresh)
     if refresh_recurring_deposits(datetime.now(pytz.timezone('Asia/Kolkata')).date()):
         update_latest_portfolio_snapshot()
     records = PortfolioSnapshot.query.order_by(PortfolioSnapshot.date.desc()).all()

@@ -31,6 +31,7 @@ IST = pytz.timezone("Asia/Kolkata")
 AMFI_URLS = ("https://portal.amfiindia.com/spages/NAVAll.txt", "https://www.amfiindia.com/spages/NAVAll.txt")
 HISTORY_URL = "https://api.mfapi.in/mf/{code}"
 NAV_REFRESH_SECONDS = 3 * 3600
+FRESH_NAV_SECONDS = 15 * 60   # a refresh asked for by hand: AMFI's file again if older
 STAMP_DUTY = 0.00005      # 0.005% of a purchase since July 2020; units are bought with the rest
 MANUAL_FOLIO = "manual"   # folio_ref of a fund added by hand
 MANUAL_GROUPS = {
@@ -102,12 +103,12 @@ def parse_amfi(text):
     return by_code
 
 
-def latest_navs():
-    """{scheme code: scheme} with today's NAVs, fetched at most every few hours.
-    A failed fetch keeps serving the last good copy."""
+def latest_navs(max_age=NAV_REFRESH_SECONDS):
+    """{scheme code: scheme} with today's NAVs, fetched at most every few hours
+    (`max_age` seconds). A failed fetch keeps serving the last good copy."""
     now = time.time()
     with _lock:
-        if _navs["by_code"] and now - _navs["at"] < NAV_REFRESH_SECONDS:
+        if _navs["by_code"] and now - _navs["at"] < max_age:
             return _navs["by_code"]
     text = None
     for url in AMFI_URLS:
@@ -334,16 +335,19 @@ def recompute_snapshot(day):
     return snap
 
 
-def refresh_if_due():
+def refresh_if_due(fresh=False):
     """The first look each day (and after AMFI publishes a newer NAV) adds due SIP
     instalments and values the funds. Cheap when there's nothing to do; never
-    stops the page loading."""
+    stops the page loading. `fresh` (a refresh by hand) checks AMFI for newer
+    NAVs now rather than within a few hours."""
     if not (Fund.query.filter(Fund.units > 0).first() or FundSip.query.filter(FundSip.active.is_(True)).first()):
         return
     today = ist_today()
     due = FundSip.query.filter(FundSip.active.is_(True), FundSip.next_date <= today).first()
     valued = FundValue.query.filter_by(date=today).all()
     try:
+        if fresh:
+            latest_navs(FRESH_NAV_SECONDS)
         if valued and not due:
             navs = latest_navs()
             # Only when AMFI has a newer NAV for something held: a fund priced

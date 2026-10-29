@@ -264,6 +264,31 @@ class PriceTimesTest(KiteDailyCase):
         self.assertFalse(self.times(noon.replace(hour=18))["stale"])       # closed for the day
 
 
+class RefreshTest(KiteDailyCase):
+    """A refresh by hand (?refresh=1) asks for prices now, not within 30 minutes."""
+
+    def test_a_refresh_reprices_now_but_not_twice_in_a_minute(self):
+        self.kite_synced(OWNER, SYNCED)
+        self.daily()
+        self.ok("GET", "/api/investments", OWNER)
+        self.ok("GET", "/api/investments", OWNER)
+        self.assertEqual(len(self.asked), 1)                  # a plain look waits its turn
+        with self.app.app_context():
+            settings = db.session.get(UserSettings, OWNER)
+            settings.kite_priced_at -= timedelta(minutes=2)
+            db.session.commit()
+        self.ok("GET", "/api/investments?refresh=1", OWNER)
+        self.assertEqual(len(self.asked), 2)
+        self.ok("GET", "/api/investments?refresh=1", OWNER)   # tapped again straight away
+        self.assertEqual(len(self.asked), 2)
+
+    def test_a_refresh_checks_amfi_for_the_funds_now(self):
+        self.ok("POST", "/api/funds", OWNER, {"code": "122639", "amount": 1000})
+        with mock.patch.object(funds_service, "latest_navs", wraps=funds_service.latest_navs) as navs:
+            self.ok("GET", "/api/investments?refresh=1", OWNER)
+        self.assertIn(mock.call(funds_service.FRESH_NAV_SECONDS), navs.call_args_list)
+
+
 class SnapshotDeleteTest(KiteDailyCase):
     """Deleting a day's snapshot: its totals and the holdings behind them."""
 

@@ -377,7 +377,9 @@ setAccounts([]);
     }
   }, []);
 
-  const fetchAll = useCallback(async (showLoading = false, attempt = 1) => {
+  // `fresh`: asked for by hand (opening or reloading the page, the refresh button),
+  // so the server prices stocks and funds now rather than within half an hour.
+  const fetchAll = useCallback(async (showLoading = false, attempt = 1, fresh = false) => {
     if (showLoading) setAppLoading(true);
 
     const addLog = (msg) => {
@@ -439,7 +441,7 @@ setAccounts([]);
       const money = acl.can('money'), invest = acl.can('invest');
       const [acc, inv, manAssets, listRes, catRes, budRes] = await Promise.all([
         when(money, `${API}/accounts`, 'Accounts', []),
-        when(invest, `${API}/investments`, 'Investments', []),
+        when(invest, `${API}/investments${fresh ? '?refresh=1' : ''}`, 'Investments', []),
         when(invest, `${API}/manual_assets`, 'Manual Assets', []),
 when(invest, `${API}/assets/list`, 'Market Symbols', {}),
         when(money, `${API}/transactions/categories`, 'Categories', { success: true, categories: [] }),
@@ -479,11 +481,11 @@ when(invest, `${API}/assets/list`, 'Market Symbols', {}),
       }
 
       // The loading screen stays up, and we try again automatically!
-      setTimeout(() => fetchAll(showLoading, attempt + 1), 3000);
+      setTimeout(() => fetchAll(showLoading, attempt + 1, fresh), 3000);
     }
   }, [logout, switchView]);
 
-  useEffect(() => { if (isLoggedIn) fetchAll(true); }, [fetchAll, isLoggedIn]);
+  useEffect(() => { if (isLoggedIn) fetchAll(true, 1, true); }, [fetchAll, isLoggedIn]);
 
   // Opening the menu checks for anything newly shared with you, so it's there to pick.
   useEffect(() => { if (isMenuOpen) refreshAccess(); }, [isMenuOpen, refreshAccess]);
@@ -577,7 +579,7 @@ const today = new Date();
           onRefresh={async () => {
             if (isRefreshing) return;
             setIsRefreshing(true);
-            await fetchAll(false);
+            await fetchAll(false, 1, true);
             setIsRefreshing(false);
           }}
           onOpenSearch={() => setIsSearchOpen(true)}
