@@ -263,6 +263,21 @@ class PriceTimesTest(KiteDailyCase):
         self.assertFalse(self.times(noon - timedelta(days=1))["stale"])    # Sunday: no market
         self.assertFalse(self.times(noon.replace(hour=18))["stale"])       # closed for the day
 
+    def test_a_market_holiday_is_closed_not_stale(self):
+        # Yahoo answers at 10 on a weekday, but its newest price is the last
+        # trading day's close: the market didn't open today (Diwali, say).
+        self.kite_synced(OWNER, SYNCED)
+        self.daily()
+        monday = TODAY + timedelta(days=7 - TODAY.weekday())
+        ten = datetime(monday.year, monday.month, monday.day, 10, 0, tzinfo=funds_service.IST)
+        with mock.patch.object(kite_daily, "datetime", wraps=datetime) as clock:
+            clock.now.return_value = ten
+            self.ok("GET", "/api/investments", OWNER)
+        times = self.times(ten + timedelta(hours=2))
+        self.assertEqual((times["stale"], times["closed_today"]), (False, True))
+        # The next day, yesterday's answer says nothing until Yahoo's asked again.
+        self.assertFalse(self.times(ten + timedelta(days=1))["closed_today"])
+
 
 class RefreshTest(KiteDailyCase):
     """A refresh by hand (?refresh=1) asks for prices now, not within 30 minutes."""

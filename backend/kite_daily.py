@@ -31,6 +31,7 @@ BATCH = 20                        # symbols Yahoo prices in one request
 MARKET_CLOSE = clock(15, 45)      # NSE closes at 15:30; its closing prices settle soon after
 REFRESH = timedelta(minutes=30)   # how old a day's prices may get while the market's open
 STALE_AFTER = timedelta(minutes=45)
+SESSION_UNDERWAY = clock(9, 30)   # by now a trading day has trades; a market holiday still has none
 FRESH_AFTER = timedelta(minutes=1)    # a refresh by hand reprices if the last was longer ago   # quotes older than this while it's open: Yahoo isn't answering
 
 
@@ -226,6 +227,8 @@ def _reprice(owner, priced_at, day, equity, funds, now):
     settings.kite_priced_at = now
     if quoted:
         settings.kite_quoted_at = quoted
+    if prices:
+        settings.kite_quotes_seen_at = now
     db.session.commit()
 
 
@@ -263,10 +266,20 @@ def _market_open(now):
     return now.weekday() < 5 and clock(9, 15) <= now.time() <= clock(15, 30)
 
 
+def _closed_today(quoted, seen, now):
+    """Market hours on a weekday, but Yahoo, answering well into the session,
+    had nothing newer than an earlier day's close: a market holiday (Diwali,
+    Holi, ...). Unlike Yahoo going quiet, its answer itself is from today."""
+    return bool(_market_open(now) and quoted is not None and seen is not None
+                and quoted.date() < now.date() and seen.date() == now.date()
+                and seen.time() >= SESSION_UNDERWAY)
+
+
 def price_times(now=None):
     """What the Investments page says about prices: on Daily, when the stocks'
     prices are from (stale when the market's open and they're well behind, as
-    when Yahoo turns the server away); on Manual, the last Kite sync."""
+    when Yahoo turns the server away, but not on a weekday the market's shut);
+    on Manual, the last Kite sync."""
     owner = data_owner()
     settings = db.session.get(UserSettings, owner) if owner else None
     mode = settings.kite_valuation if settings and settings.kite_valuation in MODES else "manual"
@@ -276,6 +289,7 @@ def price_times(now=None):
         .filter(model.owner_email == owner, model.repriced.is_(False)).scalar()
         for model in (EquityHolding, MutualFundHolding)) if d is not None), default=None)
     quoted = settings.kite_quoted_at if settings else None
+    closed = mode == "daily" and _closed_today(quoted, settings.kite_quotes_seen_at if settings else None, now)
     day = funds_service.last_kite_day(now.date())
     held = day is not None and EquityHolding.query.filter_by(date=day).first() is not None
     return {
@@ -283,5 +297,8 @@ def price_times(now=None):
         "synced": synced.isoformat() if synced else None,
         "stocks_at": quoted.isoformat() if quoted and mode == "daily" else None,
         "checked_at": settings.kite_priced_at.isoformat() if settings and settings.kite_priced_at and mode == "daily" else None,
-        "stale": bool(mode == "daily" and held and _market_open(now) and (quoted is None or now - quoted > STALE_AFTER)),
+        "stale": bool(mode == "daily" and held and _market_open(now) and not closed
+                      and (quoted is None or now - quoted > STALE_AFTER)),
+        # A weekday the market didn't open: the last close stands, nothing's wrong.
+        "closed_today": bool(held and closed),
     }

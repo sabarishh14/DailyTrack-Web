@@ -582,7 +582,8 @@ def get_budget_suggestions():
         df = pd.DataFrame(rows, columns=["heading", "month", "amount"])
         df["month"] = pd.to_datetime(df["month"])
 
-        current_month_start = pd.Timestamp(date.today().replace(day=1))
+        # The server runs on UTC; the month in progress is India's.
+        current_month_start = pd.Timestamp(datetime.now(pytz.timezone('Asia/Kolkata')).date().replace(day=1))
         df = df[df["month"] < current_month_start]  # drop the partial in-progress month
         if df.empty:
             return jsonify({"success": True, "suggestions": {}})

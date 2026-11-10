@@ -54,10 +54,11 @@ function PriceTime({ times }) {
   if (!text) return null;
   return (
     <div
-      title={times.stale ? "The market's open but the prices haven't moved: the price source isn't answering" : undefined}
+      title={times.stale ? "The market's open but the prices haven't moved: the price source isn't answering"
+        : times.closed_today ? "The market didn't open today (a holiday), so the last close stands" : undefined}
       style={{ fontSize: '0.75rem', fontWeight: 600, marginTop: '0.3rem', color: times.stale ? '#d97706' : 'var(--text3)', whiteSpace: 'nowrap' }}
     >
-      🕒 {text}{times.stale && ' · not updating'}
+      🕒 {text}{times.stale ? ' · not updating' : times.closed_today ? ' · market closed today' : ''}
     </div>
   );
 }
@@ -388,7 +389,8 @@ function InvestTab({ investments, manualAssets, assetList, onAdd }) {
     if (timeframe !== 'ALL') {
       const now = new Date();
       let cutoffDate = new Date();
-      if (timeframe === '1M') cutoffDate.setMonth(now.getMonth() - 1);
+      if (timeframe === '1W') cutoffDate.setDate(now.getDate() - 7);
+      else if (timeframe === '1M') cutoffDate.setMonth(now.getMonth() - 1);
       else if (timeframe === '3M') cutoffDate.setMonth(now.getMonth() - 3);
       else if (timeframe === '6M') cutoffDate.setMonth(now.getMonth() - 6);
       else if (timeframe === '1Y') cutoffDate.setFullYear(now.getFullYear() - 1);
@@ -657,6 +659,28 @@ function InvestTab({ investments, manualAssets, assetList, onAdd }) {
     })).sort((a, b) => b.rawDate - a.rawDate);
   }, [investments, drillDownDate]);
 
+  // Quick comparison points, as on the phone: each the newest snapshot on or
+  // before that far back from the open day (snapshots are trading days, so 1D
+  // from a Monday is Friday). Two that land on one snapshot keep the shorter.
+  const compareQuickPicks = useMemo(() => {
+    if (!drillDownDate) return [];
+    const iso = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+    const earlier = availableCompareDates.map(d => d.value).filter(v => v < drillDownDate).sort();
+    const shifts = [
+      ['1D', d => d.setDate(d.getDate() - 1)], ['1W', d => d.setDate(d.getDate() - 7)],
+      ['1M', d => d.setMonth(d.getMonth() - 1)], ['3M', d => d.setMonth(d.getMonth() - 3)],
+      ['6M', d => d.setMonth(d.getMonth() - 6)], ['1Y', d => d.setFullYear(d.getFullYear() - 1)],
+    ];
+    const picks = [];
+    for (const [label, shift] of shifts) {
+      const target = new Date(`${drillDownDate}T00:00:00`);
+      shift(target);
+      const hit = earlier.filter(v => v <= iso(target)).pop();
+      if (hit && !picks.some(p => p.value === hit)) picks.push({ label, value: hit });
+    }
+    return picks;
+  }, [drillDownDate, availableCompareDates]);
+
   const processedDrillDownData = useMemo(() => {
     let data = [...drillDownData];
     data.sort((a, b) => {
@@ -769,6 +793,23 @@ function InvestTab({ investments, manualAssets, assetList, onAdd }) {
     return { curr, inv, ret, retPct };
   }, [latest, hiddenCategories]);
 
+  // The latest snapshot against the one before, for the visible categories:
+  // snapshots are daily (weekends folded into Friday), so it's the day's move,
+  // less any money put in. "Since 3 Nov" across a long gap rather than "Today".
+  const latestMove = useMemo(() => {
+    if (investments.length < 2) return null;
+    const [last, before] = [...investments].sort((a, b) => new Date(b.date) - new Date(a.date));
+    const total = (snap, field) => ASSET_CATEGORIES.reduce(
+      (sum, cat) => (hiddenCategories.includes(cat.id) ? sum : sum + parseFloat(snap[cat[field]] || 0)), 0);
+    const base = total(before, 'field_curr');
+    if (base <= 0) return null;
+    const pnl = (total(last, 'field_curr') - base) - (total(last, 'field_inv') - total(before, 'field_inv'));
+    const lastDay = new Date(last.date), beforeDay = new Date(before.date);
+    const label = (lastDay - beforeDay) / 86400000 > 5 ? `Since ${dayMonth(beforeDay)}`
+      : sameDay(lastDay, new Date()) ? 'Today' : dayMonth(lastDay);
+    return { pnl, pct: (pnl / base) * 100, label };
+  }, [investments, hiddenCategories]);
+
   const pieData = latest ? ASSET_CATEGORIES
     .filter(cat => !hiddenCategories.includes(cat.id))
     .map(cat => ({ name: cat.label, value: parseFloat(latest[cat.field_curr] || 0), fill: cat.color }))
@@ -821,6 +862,15 @@ function InvestTab({ investments, manualAssets, assetList, onAdd }) {
                   <div style={{ fontFamily: "'Syne', sans-serif", fontSize: 'clamp(1.4rem, 7vw, 2.8rem)', fontWeight: 800, color: 'var(--text)', lineHeight: 1.2, marginTop: '0.2rem', whiteSpace: 'nowrap' }}>
                     {showBalances ? fmt(filteredTotals.curr) : '₹ ••••••'}
                   </div>
+                  {latestMove && (
+                    <div style={{ fontSize: '0.8rem', fontWeight: 600, marginTop: '0.3rem', color: 'var(--text3)', whiteSpace: 'nowrap' }}>
+                      {latestMove.label}{' '}
+                      <span className={latestMove.pnl >= 0 ? 'pos' : 'neg'} style={{ fontWeight: 700 }}>
+                        {showBalances && `${latestMove.pnl >= 0 ? '+' : '−'}${fmt(Math.abs(latestMove.pnl))} `}
+                        {showBalances ? '(' : ''}{latestMove.pnl >= 0 ? '+' : '−'}{Math.abs(latestMove.pct).toFixed(2)}%{showBalances ? ')' : ''}
+                      </span>
+                    </div>
+                  )}
                   <PriceTime times={priceTimes} />
                 </div>
                 <div style={{ display: 'flex', gap: '0.25rem', flexShrink: 0, marginTop: '-4px' }}>
@@ -1163,7 +1213,7 @@ function InvestTab({ investments, manualAssets, assetList, onAdd }) {
 
                   {/* Timeframe Toggle */}
                   <div className="timeframe-group">
-                    {['1M', '3M', '6M', '1Y', 'YTD', 'ALL'].map(tf => (
+                    {['1W', '1M', '3M', '6M', '1Y', 'YTD', 'ALL'].map(tf => (
                       <button
                         key={tf}
                         className={`tf-btn ${timeframe === tf ? 'active' : ''}`}
@@ -1752,6 +1802,22 @@ function InvestTab({ investments, manualAssets, assetList, onAdd }) {
                     >🏦 MFs</button>
                   </div>
                 </div>
+
+                {compareQuickPicks.length > 0 && (
+                  <div className="timeframe-group" style={{ marginTop: '0.6rem', width: 'fit-content', maxWidth: '100%', overflowX: 'auto' }}>
+                    {compareQuickPicks.map(p => (
+                      <button
+                        key={p.label}
+                        className={`tf-btn ${drillDownCompareDate === p.value ? 'active' : ''}`}
+                        // Picking the one already on turns comparing off.
+                        onClick={() => fetchCompareData(drillDownCompareDate === p.value ? '' : p.value, drillDownType)}
+                        title={`Compare with ${formatDate(p.value)}`}
+                      >
+                        {p.label}
+                      </button>
+                    ))}
+                  </div>
+                )}
 
               </div>
 

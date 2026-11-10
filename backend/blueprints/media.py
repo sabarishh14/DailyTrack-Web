@@ -461,7 +461,7 @@ def add_tv_diary():
         return jsonify({"success": False, "message": "Show not found"}), 404
         
     log_date_str = data.get('date')
-    log_date = datetime.strptime(log_date_str, "%Y-%m-%d").date() if log_date_str else date.today()
+    log_date = datetime.strptime(log_date_str, "%Y-%m-%d").date() if log_date_str else _ist_today()
         
     new_log = TvDiaryLog(
         tv_show_id=tv_show_id,
@@ -1077,29 +1077,8 @@ def get_movie_stats():
         films_logged = len(unique_movie_ids)
         
         # Averages
-        if year_param == 'all' and available_years:
-            num_months = max(1, (datetime.now().year - min(available_years)) * 12 + datetime.now().month)
-            num_weeks = max(1, num_months * 4.33)
-        elif year_param != 'all':
-            try:
-                yr = int(year_param)
-                if yr == datetime.now().year:
-                    from datetime import date as dt_date
-                    jan1 = dt_date(yr, 1, 1)
-                    today = dt_date.today()
-                    days_elapsed = max(1, (today - jan1).days)
-                    num_months = max(1, days_elapsed / 30.44)
-                    num_weeks = max(1, days_elapsed / 7)
-                else:
-                    num_months = 12
-                    num_weeks = 52
-            except ValueError:
-                num_months = 12
-                num_weeks = 52
-        else:
-            num_months = 12
-            num_weeks = 52
-        
+        num_weeks, num_months = _period_units(year_param, available_years)
+
         avg_per_month = round(films_logged / num_months, 1)
         avg_per_week = round(films_logged / num_weeks, 1)
         
@@ -1639,7 +1618,7 @@ def add_movie_diary():
     if not Movie.query.get(movie_id):
         return jsonify({"success": False, "message": "Movie not found"}), 404
     log_date_str = data.get('date')
-    log_date = datetime.strptime(log_date_str, "%Y-%m-%d").date() if log_date_str else date.today()
+    log_date = datetime.strptime(log_date_str, "%Y-%m-%d").date() if log_date_str else _ist_today()
     new_log = MovieDiaryLog(
         movie_id=movie_id,
         date=log_date,
@@ -1776,7 +1755,7 @@ def _perform_rss_sync_generator(username, fast_mode=False):
                     # Very simple fallback for pubdate string parsing
                     watched_date_str = datetime.strptime(pub_date.text[5:16], "%d %b %Y").strftime("%Y-%m-%d")
                 else:
-                    watched_date_str = date.today().strftime("%Y-%m-%d")
+                    watched_date_str = _ist_today().strftime("%Y-%m-%d")
                 
             rating_node = item.find('letterboxd:memberRating', ns)
             rating = float(rating_node.text) if rating_node is not None else 0

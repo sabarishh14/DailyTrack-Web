@@ -115,7 +115,7 @@ def handle_chat_query():
     IMPORTANT RULES & DOMAIN KNOWLEDGE FOR TRANSACTIONS:
     1. "Spent", "Expense", "Cost", "Paid" means `type = 'Debit'`. "Income" or "Earned" means `type = 'Credit'`.
     2. "Credit Card" means `account ILIKE 'CC-%'`. (e.g. 'CC-AXIS REWARDS', 'CC-PINNACLE 6360').
-    3. Today's date is {date.today()}. Use this for resolving "this month" or "this year" (e.g., `extract(month from date) = {date.today().month}`).
+    3. Today's date is {datetime.now(IST).date()}. Use this for resolving "this month" or "this year" (e.g., `extract(month from date) = {datetime.now(IST).month}`).
     4. If asked about a specific bank (like "Federal", "IDBI", "ICICI"), use `account ILIKE '%bankname%'`.
     5. Categories or High-level groupings are stored in `heading` (e.g., 'Food', 'Snacks', 'Daily Need', 'Transport', 'Cinema', 'Medical').
     6. Specific Merchants, items, or details are stored in `description` (e.g., 'California Burrito', 'Amazon', 'Electricity').

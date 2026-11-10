@@ -48,7 +48,17 @@ class AccountStatsTest(unittest.TestCase):
                          ("HDFC", 200.0, 1, 100.0, -50.0))
 
     def test_this_month_so_far_is_measured_against_the_months_before(self):
-        self.setUpData()
+        # Dated from today, so "the months before" are the same whenever this runs:
+        # 300 three months ago, nothing, then 600 last month, so 300 a month.
+        self.account(FRIEND, "KOTAK")
+        this_month = date.today().replace(day=1)
+
+        def months_ago(n):
+            year, month = divmod(this_month.year * 12 + this_month.month - 1 - n, 12)
+            return date(year, month + 1, 5).isoformat()
+
+        self.spend(FRIEND, amount=300, account="KOTAK", date=months_ago(3))
+        self.spend(FRIEND, amount=600, account="KOTAK", date=months_ago(1))
         self.spend(FRIEND, amount=150, account="KOTAK", date=date.today().isoformat())
         stats = self.analyze(group="account")["accounts"]
         kotak = next(r for r in stats["rows"] if r["account"] == "KOTAK")
