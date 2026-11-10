@@ -38,6 +38,39 @@ export function fmt(n) {
   return "₹" + Number(n).toLocaleString("en-IN", { maximumFractionDigits: 2 });
 }
 
+// Accounts can hold another currency (a USD account beside the rupee ones),
+// mirroring the backend's currencies.py: a transaction on one is entered in it
+// and stored in rupees too (`amount`), with `original_amount` and `currency`
+// keeping what was entered. Balances, minimums and card budgets are in the
+// account's own currency; totals turn them into rupees at today's rate.
+export const HOME_CURRENCY = 'INR';
+export const CURRENCIES = [
+  ['INR', '₹', 'Indian rupee'], ['USD', '$', 'US dollar'], ['EUR', '€', 'Euro'], ['GBP', '£', 'British pound'],
+  ['AED', 'AED ', 'UAE dirham'], ['SGD', 'S$', 'Singapore dollar'], ['AUD', 'A$', 'Australian dollar'],
+  ['CAD', 'C$', 'Canadian dollar'], ['NZD', 'NZ$', 'New Zealand dollar'], ['JPY', '¥', 'Japanese yen'],
+  ['CHF', 'CHF ', 'Swiss franc'], ['HKD', 'HK$', 'Hong Kong dollar'], ['SAR', 'SAR ', 'Saudi riyal'],
+  ['QAR', 'QAR ', 'Qatari riyal'], ['KWD', 'KWD ', 'Kuwaiti dinar'], ['BHD', 'BHD ', 'Bahraini dinar'], ['MYR', 'RM ', 'Malaysian ringgit'],
+  ['THB', '฿', 'Thai baht'],
+];
+const CURRENCY_SYMBOLS = Object.fromEntries(CURRENCIES.map(([code, symbol]) => [code, symbol]));
+
+export const currencySymbol = (code) => CURRENCY_SYMBOLS[code || HOME_CURRENCY] ?? `${code} `;
+export const isForeignCurrency = (code) => !!code && code !== HOME_CURRENCY;
+
+/** fmt in any currency: "₹1,250", "$12.5", "AED 40". */
+export function fmtMoney(n, code) {
+  if (!isForeignCurrency(code)) return fmt(n);
+  const value = n === undefined || n === null || isNaN(n) ? 0 : Number(n);
+  return `${value < 0 ? '-' : ''}${currencySymbol(code)}${Math.abs(value).toLocaleString('en-IN', { maximumFractionDigits: 2 })}`;
+}
+
+/** A transaction's amount as entered, in its account's currency (what edits start from). */
+export const enteredAmount = (tx) => (tx?.original_amount ?? tx?.amount);
+
+/** An account's balance in rupees at today's rate, for totals. */
+export const balanceInRupees = (account) =>
+  (account?.balance_inr ?? null) !== null ? Number(account.balance_inr) : Number(account?.balance || 0);
+
 export function fmtPct(n) {
   if (isNaN(n)) return "0%";
   return (n >= 0 ? "+" : "") + Number(n).toFixed(2) + "%";

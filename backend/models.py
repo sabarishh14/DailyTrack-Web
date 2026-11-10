@@ -28,6 +28,8 @@ class Account(Owned, db.Model):
     min_balance = db.Column(Money, nullable=True)
     # A credit card's spending limit for each calendar month. None = no limit.
     monthly_budget = db.Column(Money, nullable=True)
+    # ISO code the account holds money in; its balance, minimum and budget are in it (currencies.py).
+    currency = db.Column(db.String(3), nullable=False, default="INR", server_default="INR")
 class Transaction(Owned, db.Model):
     __tablename__ = "transactions"
     # Identical spends on one day are fine (two ₹90 snacks), so there's no
@@ -46,6 +48,11 @@ class Transaction(Owned, db.Model):
     amount = db.Column(Money, nullable=False)
     synced = db.Column(db.Boolean, default=False)
     exclude_analytics = db.Column(db.Boolean, default=False)
+    # On an account in another currency: `amount` is in rupees, and these keep
+    # what was entered and the rupees per unit it was stored at. Null on rupee accounts.
+    original_amount = db.Column(Money, nullable=True)
+    currency = db.Column(db.String(3), nullable=True)
+    fx_rate = db.Column(db.Float, nullable=True)
 class Split(Owned, db.Model):
     __tablename__ = "splits"
     id = db.Column(BigId, primary_key=True)

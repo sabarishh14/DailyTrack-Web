@@ -1,9 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { API } from '../../constants';
-import {
-  fmt, getToken, evaluateMath, balanceDelta, isCcAccount,
-  buildDescriptionIndex, categoriesForType, descriptionOptions, defaultAccount,
-} from '../../utils';
+import { fmt, getToken, evaluateMath, balanceDelta, isCcAccount, buildDescriptionIndex, categoriesForType, descriptionOptions, defaultAccount, fmtMoney } from '../../utils';
 import { useAccountOptions, useLatestMoneyMeta, EMPTY_META } from '../../api/money';
 import {
   SheetSelect, SheetSuggest, toDisplayDate, parseDisplayDate,
@@ -166,9 +163,9 @@ export default function SheetEntryRow({ gridColumns, tableMinWidth, withBalances
       {withBalances && (
         <span
           className={`tx-balance sheet-derived ${belowMin ? 'below' : ''}`}
-          title={projected != null ? `${row.account} after this entry${belowMin ? ` · below the ${fmt(acc.min_balance)} minimum` : ''}` : undefined}
+          title={projected != null ? `${row.account} after this entry${belowMin ? ` · below the ${fmtMoney(acc.min_balance, acc.currency)} minimum` : ''}` : undefined}
         >
-          {projected != null && row.amount ? fmt(projected) : ''}
+          {projected != null && row.amount ? fmtMoney(projected, acc?.currency) : ''}
         </span>
       )}
     </div>

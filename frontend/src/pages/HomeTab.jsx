@@ -6,7 +6,7 @@ import { getAuth, signInWithPopup, GoogleAuthProvider, signOut } from 'firebase/
 import SabDekho from './SabDekho';
 
 import { API, MONTHS, BANKS } from '../constants';
-import { getToken, formatDate, fmt, fmtPct, getBankEmoji, accountColor, isCcAccount } from '../utils';
+import { getToken, formatDate, fmt, fmtPct, getBankEmoji, accountColor, isCcAccount, fmtMoney, balanceInRupees } from '../utils';
 import CustomSelect from '../components/CustomSelect';
 import ReconciliationModal from '../components/ReconciliationModal';
 import FirstAccountPrompt from '../components/FirstAccountPrompt';
@@ -127,9 +127,10 @@ const [showInvestments, setShowInvestments] = useState(false);
     }
   };
 
+  // In rupees: accounts in another currency at today's rate.
   const netWorth = accounts
     .filter(a => a.balance_tracked)
-    .reduce((s, a) => s + parseFloat(a.balance || 0), 0);
+    .reduce((s, a) => s + balanceInRupees(a), 0);
 
   // Grab the newest snapshot (index 0) and use your new total columns
   const latestInv = investments.length > 0 ? investments[0] : null;
@@ -251,12 +252,12 @@ const [showInvestments, setShowInvestments] = useState(false);
                     <span className="acc-name">{a.account}</span>
                   </div>
                   <div className="acc-balance">
-                    {!showBalances ? '₹ ••••••' : card ? (used > 0 ? `−${fmt(used)}` : fmt(0)) : fmt(a.balance)}
+                    {!showBalances ? '₹ ••••••' : card ? (used > 0 ? `−${fmtMoney(used, a.currency)}` : fmtMoney(0, a.currency)) : fmtMoney(a.balance, a.currency)}
                     {showBalances && card && <span className="acc-caption">this month</span>}
                   </div>
                   {showBalances && (card
-                    ? <CardBudgetChip account={a.account} budget={a.monthly_budget} used={budgetUsed(a)} editable={fullMoney} onSaved={onRefresh} />
-                    : <MinBalanceChip account={a.account} min={a.min_balance} editable={fullMoney} onSaved={onRefresh} />)}
+                    ? <CardBudgetChip account={a.account} budget={a.monthly_budget} used={budgetUsed(a)} editable={fullMoney} onSaved={onRefresh} currency={a.currency} />
+                    : <MinBalanceChip account={a.account} min={a.min_balance} editable={fullMoney} onSaved={onRefresh} currency={a.currency} />)}
                 </div>
               );
             })}

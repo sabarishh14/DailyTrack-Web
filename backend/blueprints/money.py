@@ -18,6 +18,7 @@ from access import require_api_key, require_admin, require_access, current_acces
 from tenancy import data_owner
 
 from push import send_card_budget_alert, send_low_balance_alert
+import currencies
 from blueprints.media import invalidate_stats_cache, _perform_rss_sync_generator, fetch_tmdb_movie_details, letterboxd_username
 
 money_bp = Blueprint("money", __name__)
@@ -79,6 +80,41 @@ def apply_balance(account_name, tx_type, amount, undo=False):
         return
     delta = float(amount) if normalize_tx_type(tx_type) == "Credit" else -float(amount)
     account.balance = round((account.balance or 0) + (-delta if undo else delta), 2)
+
+def native_amount(tx):
+    """What a transaction moved in its account's own currency (balances, card use)."""
+    return tx.original_amount if tx.original_amount is not None else tx.amount
+
+# The same in SQL, for sums over an account's transactions.
+NATIVE_AMOUNT = db.func.coalesce(Transaction.original_amount, Transaction.amount)
+
+def priced(account_name, amount, previous=None):
+    """A transaction's stored amount fields for `amount` in its account's
+    currency: rupees in `amount` (what budgets, the analyser and Sheets add up)
+    and, on a foreign account, what was entered and the rate used. An edit that
+    keeps the currency keeps its rate, so its rupees move only with the amount.
+    Raises currencies.RateUnavailable when there's no rate to use."""
+    account = own_account(account_name)
+    code = (account.currency if account else None) or currencies.HOME
+    amount = round(float(amount), 2)
+    if code == currencies.HOME:
+        return {"amount": amount, "original_amount": None, "currency": None, "fx_rate": None}
+    keep = previous is not None and previous.currency == code and previous.fx_rate
+    fx = previous.fx_rate if keep else currencies.rate(code)
+    return {"amount": round(amount * fx, 2), "original_amount": amount, "currency": code, "fx_rate": fx}
+
+def _entered_amount(tx, data):
+    """An edit's amount, in its account's currency. An app from before
+    currencies sends back the rupees it showed: unchanged on the same foreign
+    account, that means the amount as it was entered."""
+    entered = float(data['amount'])
+    if tx.original_amount is not None and data.get('account') == tx.account and entered == float(tx.amount):
+        return float(tx.original_amount)
+    return entered
+
+def _set_amount(tx, entered):
+    for field, value in priced(tx.account, entered, previous=tx).items():
+        setattr(tx, field, value)
 def set_balance(account, new_balance, reason):
     """Set a balance by hand, recording the jump so running balances in the
     transactions table stay right for rows from before it."""
@@ -116,6 +152,7 @@ def _balance_changes(before):
         "after": acc.balance or 0,
         "min_balance": acc.min_balance,
         "below_min": acc.min_balance is not None and (acc.balance or 0) < acc.min_balance,
+        "currency": acc.currency or currencies.HOME,
     } for acc in sorted(accounts, key=lambda a: a.account)]
 
 def card_usage(account_names, today=None, counted_only=False):
@@ -131,7 +168,7 @@ def card_usage(account_names, today=None, counted_only=False):
     if not cards:
         return {}
     month = (today or datetime.now(pytz.timezone('Asia/Kolkata')).date()).replace(day=1)
-    signed = db.case((db.func.lower(Transaction.type) == "credit", -Transaction.amount), else_=Transaction.amount)
+    signed = db.case((db.func.lower(Transaction.type) == "credit", -NATIVE_AMOUNT), else_=NATIVE_AMOUNT)
     query = (db.session.query(Transaction.account, db.func.sum(signed))
              .filter(Transaction.account.in_(cards), Transaction.month == month))
     if counted_only:
@@ -147,7 +184,8 @@ def _card_changes(before, budget_before):
     db.session.flush()
     after = card_usage(before)
     budget_after = card_usage(before, counted_only=True)
-    budgets = {a.account: a.monthly_budget for a in Account.query.filter(Account.account.in_(list(before))).all()}
+    cards = {a.account: a for a in Account.query.filter(Account.account.in_(list(before))).all()}
+    budgets = {name: card.monthly_budget for name, card in cards.items()}
     return [{
         "account": name,
         "before": before[name],
@@ -156,6 +194,7 @@ def _card_changes(before, budget_before):
         "budget_after": budget_after.get(name, 0.0),
         "monthly_budget": budgets.get(name),
         "over_budget": budgets.get(name) is not None and budget_after.get(name, 0.0) > budgets[name],
+        "currency": cards[name].currency or currencies.HOME,
     } for name in sorted(before) if name in budgets]
 
 def _need_full_money():
@@ -301,6 +340,11 @@ def get_accounts():
             "used_this_month": used.get(acc.account),
             "budget_used_this_month": counted.get(acc.account),
             "monthly_budget": acc.monthly_budget if show else None,
+            "currency": acc.currency or currencies.HOME,
+            # The balance in rupees at today's rate, for totals, and the rate itself
+            # (rupees per unit) for a card's use; null without a rate.
+            "balance_inr": currencies.to_home(acc.balance or 0, acc.currency) if show else None,
+            "inr_rate": currencies.to_home(1, acc.currency),
         }
         for acc in accounts
     ]
@@ -369,6 +413,15 @@ def update_account():
         if budget is not None and budget <= 0:
             return jsonify({"success": False, "message": "The budget must be more than zero"}), 400
         account.monthly_budget = budget
+    if 'currency' in data:
+        currency = str(data['currency'] or '').strip().upper()
+        if currency not in currencies.SYMBOLS:
+            return jsonify({"success": False, "message": "Pick one of the listed currencies"}), 400
+        # Its transactions were entered in the old one: only an account with none can switch.
+        if currency != account.currency and Transaction.query.filter_by(account=account.account).first():
+            return jsonify({"success": False, "message": f"{account.account} already has transactions in "
+                            f"{account.currency}; add a new account for {currency}"}), 400
+        account.currency = currency
 
     db.session.commit()
 
@@ -387,6 +440,8 @@ def _account_dict(acc):
         "used_this_month": 0.0 if is_cc_account(acc.account) else None,
         "budget_used_this_month": 0.0 if is_cc_account(acc.account) else None,
         "monthly_budget": acc.monthly_budget,
+        "currency": acc.currency or currencies.HOME,
+        "balance_inr": currencies.to_home(acc.balance or 0, acc.currency),
     }
 
 def _optional_amount(raw):
@@ -446,6 +501,9 @@ def create_account():
         return bad("The minimum balance can't be negative")
     if monthly_budget is not None and monthly_budget <= 0:
         return bad("The budget must be more than zero")
+    currency = str(data.get("currency") or currencies.HOME).strip().upper()
+    if currency not in currencies.SYMBOLS:
+        return bad("Pick one of the listed currencies")
 
     savings = kind == "savings"
     account = Account(
@@ -455,6 +513,7 @@ def create_account():
         balance_tracked=True,
         min_balance=min_balance if savings else None,
         monthly_budget=None if savings else monthly_budget,
+        currency=currency,
     )
     db.session.add(account)
     db.session.commit()
@@ -649,6 +708,8 @@ def get_transactions():
             "heading": tx.heading,
             "description": tx.description,
             "amount": tx.amount,
+            "original_amount": tx.original_amount,
+            "currency": tx.currency,
             "exclude_analytics": getattr(tx, 'exclude_analytics', False),
             "split": split_map.get(tx.id)
         }
@@ -725,8 +786,8 @@ def add_transaction():
                 type=tx_type,
                 heading=item['heading'],
                 description=item.get('description', ''),
-                amount=amount,
-                exclude_analytics=bool(item.get('exclude_analytics')) or item.get('heading') in auto_excluded
+                exclude_analytics=bool(item.get('exclude_analytics')) or item.get('heading') in auto_excluded,
+                **priced(acc_name, amount)
             )
             db.session.add(new_tx)
             db.session.flush() # Force insert of transaction to satisfy foreign key constraints
@@ -831,6 +892,10 @@ def add_transaction():
         # Cards go in their own list: older apps read every "balances" entry as money left.
         return jsonify({"success": True, "message": msg, "balances": balance_changes, "cards": card_changes})
 
+    except currencies.RateUnavailable as e:
+        db.session.rollback()
+        return jsonify({"success": False, "code": "NO_RATE",
+                        "message": f"{e}. Nothing was saved; try again in a bit."}), 503
     except Exception as e:
         print(f"❌ Error adding transaction(s): {str(e)}")
         db.session.rollback() # Safely undo everything if there's an error
@@ -932,10 +997,10 @@ def save_split():
         # Load the transaction to mark it as unsynced
         tx = Transaction.query.get(transaction_id)
         if tx:
-            if new_tx_amount is not None and tx.amount != float(new_tx_amount):
-                apply_balance(tx.account, tx.type, tx.amount, undo=True)
-                tx.amount = float(new_tx_amount)
-                apply_balance(tx.account, tx.type, tx.amount)
+            if new_tx_amount is not None and native_amount(tx) != float(new_tx_amount):
+                apply_balance(tx.account, tx.type, native_amount(tx), undo=True)
+                _set_amount(tx, float(new_tx_amount))
+                apply_balance(tx.account, tx.type, native_amount(tx))
 
             # Always mark as unsynced so it gets pushed to Sheets
             tx.synced = False
@@ -999,7 +1064,7 @@ def delete_transaction(tid):
     if not tx or not current_access().tx_allowed(tx.heading, tx.account):
         return jsonify({"success": False, "message": "Transaction not found"}), 404
 
-    apply_balance(tx.account, tx.type, tx.amount, undo=True)
+    apply_balance(tx.account, tx.type, native_amount(tx), undo=True)
 
     # Matches block 2 of the Apps Script; sent once the delete is committed.
     sheets_payload = {"type": "delete_transaction", "data": {"id": str(tx.id), "account": tx.account}}
@@ -1028,7 +1093,7 @@ def edit_transaction(tid):
         if invalid: return invalid
         new_type = normalize_tx_type(data['type'])
 
-        apply_balance(tx.account, tx.type, tx.amount, undo=True)
+        apply_balance(tx.account, tx.type, native_amount(tx), undo=True)
 
         # Check if actual financial data changed before triggering a sync
         date_str = data['date']
@@ -1036,12 +1101,13 @@ def edit_transaction(tid):
             date_str = date_str.split('T')[0]
         date_obj = datetime.strptime(date_str, '%Y-%m-%d')
 
+        entered = _entered_amount(tx, data)
         needs_sync = (
             str(tx.date) != date_str or
             tx.type != new_type or
             tx.heading != data['heading'] or
             (tx.description or '') != data.get('description', '') or
-            tx.amount != float(data['amount']) or
+            float(native_amount(tx)) != entered or
             tx.account != data['account']
         )
 
@@ -1050,15 +1116,15 @@ def edit_transaction(tid):
         tx.type = new_type
         tx.heading = data['heading']
         tx.description = data.get('description', '')
-        tx.amount = float(data['amount'])
         tx.account = data['account']
+        _set_amount(tx, entered)
         tx.exclude_analytics = data.get('exclude_analytics', False)
         
         # Mark as unsynced ONLY if core fields changed (ignore exclude toggle)
         if needs_sync:
             tx.synced = False
 
-        apply_balance(tx.account, tx.type, tx.amount)
+        apply_balance(tx.account, tx.type, native_amount(tx))
 
         db.session.commit()
         return jsonify({"success": True, "message": "Transaction updated successfully!"})
@@ -1093,7 +1159,7 @@ def bulk_edit_transactions():
                 continue  # Skip if ID not found somehow
 
             new_type = normalize_tx_type(data['type'])
-            apply_balance(tx.account, tx.type, tx.amount, undo=True)
+            apply_balance(tx.account, tx.type, native_amount(tx), undo=True)
 
             date_str = data['date']
             if 'T' in date_str:
@@ -1101,12 +1167,13 @@ def bulk_edit_transactions():
                 
             date_obj = datetime.strptime(date_str, '%Y-%m-%d')
 
+            entered = _entered_amount(tx, data)
             needs_sync = (
                 str(tx.date) != date_str or
                 tx.type != new_type or
                 tx.heading != data['heading'] or
                 (tx.description or '') != data.get('description', '') or
-                tx.amount != float(data['amount']) or
+                float(native_amount(tx)) != entered or
                 tx.account != data['account']
             )
 
@@ -1115,15 +1182,15 @@ def bulk_edit_transactions():
             tx.type = new_type
             tx.heading = data['heading']
             tx.description = data.get('description', '')
-            tx.amount = float(data['amount'])
             tx.account = data['account']
+            _set_amount(tx, entered)
             tx.exclude_analytics = data.get('exclude_analytics', False)
             
             # Mark as unsynced ONLY if core fields changed
             if needs_sync:
                 tx.synced = False
 
-            apply_balance(tx.account, tx.type, tx.amount)
+            apply_balance(tx.account, tx.type, native_amount(tx))
 
             updated_count += 1
 
@@ -1152,7 +1219,7 @@ def bulk_delete_transactions():
         # One query for all of them (was one per id).
         for tx in Transaction.query.filter(Transaction.id.in_(ids)).all():
 
-            apply_balance(tx.account, tx.type, tx.amount, undo=True)
+            apply_balance(tx.account, tx.type, native_amount(tx), undo=True)
 
             # Delete split first if it exists
             Split.query.filter_by(transaction_id=tx.id).delete()

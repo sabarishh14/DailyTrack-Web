@@ -148,6 +148,9 @@ def serialize_transactions(transactions):
         "heading": t.heading,
         "description": t.description,
         "amount": t.amount,
+        # On an account in another currency: what was entered, and in what (`amount` is rupees).
+        "original_amount": t.original_amount,
+        "currency": t.currency,
         "exclude_analytics": bool(t.exclude_analytics),
         "split": split_map.get(t.id),
     } for t in transactions]
@@ -168,7 +171,9 @@ def balances_after(rows):
     if not current:
         return {}
     accounts = list(current)
-    signed = case((func.lower(Transaction.type) == "credit", Transaction.amount), else_=-Transaction.amount)
+    # In each account's own currency, like its balance.
+    native = func.coalesce(Transaction.original_amount, Transaction.amount)
+    signed = case((func.lower(Transaction.type) == "credit", native), else_=-native)
     # One ledger of transactions and hand-set jumps, in the order they happened.
     moves = db.session.query(
         Transaction.id.label("id"), Transaction.account.label("account"), Transaction.date.label("date"),

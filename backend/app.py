@@ -95,6 +95,11 @@ with app.app_context():
     try:
         db.session.execute(text("ALTER TABLE accounts ADD COLUMN IF NOT EXISTS min_balance NUMERIC(14,2)"))
         db.session.execute(text("ALTER TABLE accounts ADD COLUMN IF NOT EXISTS monthly_budget NUMERIC(14,2)"))
+        # Accounts in other currencies (currencies.py): every existing one is rupees.
+        db.session.execute(text("ALTER TABLE accounts ADD COLUMN IF NOT EXISTS currency VARCHAR(3) NOT NULL DEFAULT 'INR'"))
+        db.session.execute(text("ALTER TABLE transactions ADD COLUMN IF NOT EXISTS original_amount NUMERIC(14,2)"))
+        db.session.execute(text("ALTER TABLE transactions ADD COLUMN IF NOT EXISTS currency VARCHAR(3)"))
+        db.session.execute(text("ALTER TABLE transactions ADD COLUMN IF NOT EXISTS fx_rate DOUBLE PRECISION"))
         # A recurring deposit's monthly instalment (manual assets, category RD).
         db.session.execute(text("ALTER TABLE manual_assets ADD COLUMN IF NOT EXISTS installment DOUBLE PRECISION"))
         db.session.commit()

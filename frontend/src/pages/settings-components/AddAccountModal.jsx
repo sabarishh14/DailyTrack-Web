@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { apiPost } from '../../api/money';
-import { fmt, getBankEmoji } from '../../utils';
+import { CURRENCIES, HOME_CURRENCY, currencySymbol, fmtMoney, getBankEmoji, isForeignCurrency } from '../../utils';
 
 const MAX_NAME = 50;
 const CARD_PINK = '#ec4899';
@@ -33,6 +33,7 @@ export default function AddAccountModal({ existingNames, onClose, onAdded }) {
   const [name, setName] = useState('');
   const [balance, setBalance] = useState('');
   const [minimum, setMinimum] = useState('');
+  const [currency, setCurrency] = useState(HOME_CURRENCY);
   const [saving, setSaving] = useState(false);
   const [serverError, setServerError] = useState('');
 
@@ -71,6 +72,7 @@ export default function AddAccountModal({ existingNames, onClose, onAdded }) {
         type: creditCard ? 'credit_card' : 'savings',
         balance: creditCard ? null : balanceValue,
         min_balance: creditCard ? null : minValue,
+        currency,
       });
       if (!res || !res.success) throw new Error(res?.message || "Couldn't add the account");
       onAdded(res.account);
@@ -121,11 +123,11 @@ export default function AddAccountModal({ existingNames, onClose, onAdded }) {
               <b className={final ? '' : 'placeholder'}>{shownName}</b>
               <span>
                 {creditCard ? 'Credit card'
-                  : minValue != null && !Number.isNaN(minValue) ? `Min ${fmt(minValue)}`
+                  : minValue != null && !Number.isNaN(minValue) ? `Min ${fmtMoney(minValue, currency)}`
                   : 'Savings account'}
               </span>
             </span>
-            {!creditCard && <span className="st-preview-balance">{fmt(Number.isNaN(balanceValue) ? 0 : balanceValue ?? 0)}</span>}
+            {!creditCard && <span className="st-preview-balance">{fmtMoney(Number.isNaN(balanceValue) ? 0 : balanceValue ?? 0, currency)}</span>}
           </div>
 
           <label className="st-field">
@@ -144,12 +146,29 @@ export default function AddAccountModal({ existingNames, onClose, onAdded }) {
             {nameProblem && <span className="st-hint error">{nameProblem}</span>}
           </label>
 
+          <label className="st-field">
+            <span className="st-label">Currency</span>
+            <span className="st-input-wrap">
+              <select value={currency} onChange={edit(setCurrency)} className="st-select">
+                {CURRENCIES.map(([code, symbol, label]) => (
+                  <option key={code} value={code}>{symbol.trim()}  {code} · {label}</option>
+                ))}
+              </select>
+            </span>
+            {isForeignCurrency(currency) && (
+              <span className="st-hint">
+                Amounts on it are in {currency}; totals turn them into rupees at today's rate
+                (<a href="https://www.exchangerate-api.com" target="_blank" rel="noreferrer">rates by ExchangeRate-API</a>).
+              </span>
+            )}
+          </label>
+
           {!creditCard ? (
             <div className="st-field-pair">
               <label className="st-field">
                 <span className="st-label">Current balance</span>
                 <span className="st-input-wrap">
-                  <span className="st-affix">₹</span>
+                  <span className="st-affix">{currencySymbol(currency).trim()}</span>
                   <input inputMode="decimal" value={balance} onChange={edit(setBalance)} placeholder="0" />
                 </span>
                 <span className="st-hint">What's in it right now. Transactions move it from here.</span>
@@ -157,14 +176,14 @@ export default function AddAccountModal({ existingNames, onClose, onAdded }) {
               <label className="st-field">
                 <span className="st-label">Minimum balance <em>(optional)</em></span>
                 <span className="st-input-wrap">
-                  <span className="st-affix">₹</span>
+                  <span className="st-affix">{currencySymbol(currency).trim()}</span>
                   <input inputMode="decimal" value={minimum} onChange={edit(setMinimum)} placeholder="2000" />
                 </span>
                 <span className="st-hint">Get an alert when a transaction takes it below this.</span>
               </label>
             </div>
           ) : (
-            <p className="st-note">Spends are recorded against the card. Its balance stays at ₹0, so it doesn't change your totals.</p>
+            <p className="st-note">Spends are recorded against the card. Its balance stays at zero, so it doesn't change your totals.</p>
           )}
 
           {(amountProblem || serverError) && <div className="st-error">{serverError || amountProblem}</div>}

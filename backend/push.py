@@ -8,13 +8,14 @@ import threading
 from firebase_admin import messaging
 from flask import current_app
 
+import currencies
 from extensions import db
 from models import DeviceToken
 
 
-def _rupees(value):
-    value = float(value)
-    return f"{value:,.0f}" if value == int(value) else f"{value:,.2f}"
+def _money(value, change):
+    """An amount in the account's currency: "₹1,250", "$12.50"."""
+    return currencies.money(value, change.get("currency"))
 
 
 def low_balance_message(changes):
@@ -24,8 +25,8 @@ def low_balance_message(changes):
         return None
     title = (f"{below[0]['account']} is below its minimum" if len(below) == 1
              else f"{len(below)} accounts are below their minimum")
-    lines = [f"{c['account']}: ₹{_rupees(c['after'])} left · ₹{_rupees(c['min_balance'] - c['after'])} "
-             f"under ₹{_rupees(c['min_balance'])}" for c in below]
+    lines = [f"{c['account']}: {_money(c['after'], c)} left · {_money(c['min_balance'] - c['after'], c)} "
+             f"under {_money(c['min_balance'], c)}" for c in below]
     return title, "\n".join(lines)
 
 
@@ -37,8 +38,8 @@ def card_budget_message(cards):
     title = (f"{over[0]['account']} is over its monthly budget" if len(over) == 1
              else f"{len(over)} cards are over their monthly budget")
     # The budget counts what the spending analyser does, so that's the number here.
-    lines = [f"{c['account']}: ₹{_rupees(c.get('budget_after', c['after']))} spent · "
-             f"₹{_rupees(c.get('budget_after', c['after']) - c['monthly_budget'])} over ₹{_rupees(c['monthly_budget'])}"
+    lines = [f"{c['account']}: {_money(c.get('budget_after', c['after']), c)} spent · "
+             f"{_money(c.get('budget_after', c['after']) - c['monthly_budget'], c)} over {_money(c['monthly_budget'], c)}"
              for c in over]
     return title, "\n".join(lines)
 

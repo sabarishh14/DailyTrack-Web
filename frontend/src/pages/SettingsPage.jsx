@@ -3,7 +3,7 @@ import { ACCENT_PALETTES } from '../constants';
 import { useAccess } from '../access/AccessContext';
 import { apiGet, apiPost, useMoneyMeta, EMPTY_META } from '../api/money';
 import { API } from '../constants';
-import { accountColor, fmt, getBankEmoji, getToken, isCcAccount } from '../utils';
+import { accountColor, fmt, getBankEmoji, getToken, isCcAccount, fmtMoney, balanceInRupees, currencySymbol } from '../utils';
 import { CardBudgetChip, MinBalanceChip, budgetUsed } from '../components/BalanceImpact';
 import ReconciliationModal from '../components/ReconciliationModal';
 import BudgetManagerModal from '../components/BudgetManagerModal';
@@ -226,7 +226,8 @@ function AccountsSection({ accounts = [], onRefresh, onToast }) {
   const byName = (a, b) => a.account.localeCompare(b.account);
   const savings = accounts.filter(a => !isCcAccount(a.account)).sort(byName);
   const cards = accounts.filter(a => isCcAccount(a.account)).sort(byName);
-  const total = savings.filter(a => a.balance_tracked).reduce((sum, a) => sum + (a.balance || 0), 0);
+  // In rupees: accounts in another currency at today's rate.
+  const total = savings.filter(a => a.balance_tracked).reduce((sum, a) => sum + balanceInRupees(a), 0);
   const names = useMemo(() => new Set(accounts.map(a => a.account.toLowerCase())), [accounts]);
 
   return (
@@ -251,7 +252,7 @@ function AccountsSection({ accounts = [], onRefresh, onToast }) {
             <div className="st-acc-text">
               <b>{a.account}</b>
               {a.balance_tracked
-                ? <MinBalanceChip account={a.account} min={a.min_balance} editable onSaved={onRefresh} />
+                ? <MinBalanceChip account={a.account} min={a.min_balance} editable onSaved={onRefresh} currency={a.currency} />
                 : <span className="st-muted">Balance not tracked</span>}
             </div>
             {a.balance_tracked && <BalanceEdit account={a} onSaved={onRefresh} onToast={onToast} />}
@@ -267,11 +268,11 @@ function AccountsSection({ accounts = [], onRefresh, onToast }) {
             <span className="st-acc-badge">💳</span>
             <div className="st-acc-text">
               <b>{a.account}</b>
-              <CardBudgetChip account={a.account} budget={a.monthly_budget} used={budgetUsed(a)} editable onSaved={onRefresh} />
+              <CardBudgetChip account={a.account} budget={a.monthly_budget} used={budgetUsed(a)} editable onSaved={onRefresh} currency={a.currency} />
             </div>
             {a.used_this_month != null && (
               <span className="st-card-used" title="Used this month; starts again on the 1st">
-                {a.used_this_month > 0 ? `−${fmt(a.used_this_month)}` : fmt(0)}
+                {a.used_this_month > 0 ? `−${fmtMoney(a.used_this_month, a.currency)}` : fmtMoney(0, a.currency)}
                 <small>this month</small>
               </span>
             )}
@@ -314,7 +315,7 @@ function BalanceEdit({ account, onSaved, onToast }) {
       });
       if (!res.ok) throw new Error(`Server returned ${res.status}`);
       setEditing(false);
-      onToast(`✅ ${account.account} set to ${fmt(n)}`);
+      onToast(`✅ ${account.account} set to ${fmtMoney(n, account.currency)}`);
       onSaved();
     } catch (e) {
       onToast(`Couldn't save: ${e.message}`);
@@ -326,13 +327,13 @@ function BalanceEdit({ account, onSaved, onToast }) {
   if (!editing) {
     return (
       <button className="st-acc-balance st-balance-btn" onClick={start} title="Edit balance">
-        {fmt(account.balance || 0)}
+        {fmtMoney(account.balance || 0, account.currency)}
       </button>
     );
   }
   return (
     <span className="st-balance-edit">
-      <span>₹</span>
+      <span>{currencySymbol(account.currency).trim()}</span>
       <input
         autoFocus inputMode="decimal" value={value} disabled={saving}
         onChange={e => setValue(e.target.value)}

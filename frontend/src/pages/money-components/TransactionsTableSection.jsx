@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { API } from '../../constants';
-import { fmt, formatDate, getBankEmoji, getToken, buildDescriptionIndex, categoriesForType, descriptionOptions } from '../../utils';
+import { fmt, formatDate, getBankEmoji, getToken, buildDescriptionIndex, categoriesForType, descriptionOptions, enteredAmount, fmtMoney } from '../../utils';
 import { useLatestMoneyMeta, EMPTY_META } from '../../api/money';
 import { CellEditor } from './SheetCells';
 import MultiSelectDropdown from './MultiSelectDropdown';
@@ -153,10 +153,11 @@ export default function TransactionsTableSection({
   const saveCell = async (tx, field, value) => {
     const payload = {
       date: String(tx.date).slice(0, 10), account: tx.account, type: tx.type, heading: tx.heading,
-      description: tx.description || '', amount: Number(tx.amount), exclude_analytics: !!tx.exclude_analytics,
+      description: tx.description || '', amount: Number(enteredAmount(tx)), exclude_analytics: !!tx.exclude_analytics,
       [field]: value,
     };
-    if (payload[field] === (field === 'date' ? String(tx.date).slice(0, 10) : tx[field] ?? '')) return;
+    const unchanged = field === 'date' ? String(tx.date).slice(0, 10) : field === 'amount' ? Number(enteredAmount(tx)) : tx[field] ?? '';
+    if (payload[field] === unchanged) return;
     setPending(p => ({ ...p, [tx.id]: { ...(p[tx.id] || {}), [field]: value } }));
     try {
       const res = await fetch(`${API}/transactions/${tx.id}`, {
@@ -647,7 +648,7 @@ export default function TransactionsTableSection({
                 {cell('type', 'tx-type-cell', <span className={`tx-badge ${t.type.toLowerCase()}`}>{t.type.charAt(0).toUpperCase() + t.type.slice(1)}</span>)}
                 <span className="tx-month">{monthLabel}</span>
                 {cell('amount', `tx-amount ${t.type === 'Credit' ? 'pos' : t.type === 'Investment' ? 'blue-text' : t.type === 'Savings' ? 'accent' : 'neg'}`, <>
-                  {t.type === 'Credit' ? '+' : '−'}{fmt(t.amount)}
+                  {t.type === 'Credit' ? '+' : '−'}{fmtMoney(enteredAmount(t), t.currency)}
                 </>)}
                 {cell('heading', 'tx-heading', t.heading)}
                 {cell('description', 'tx-desc', <>

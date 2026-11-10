@@ -187,7 +187,7 @@ export function SheetSuggest({ value, onChange, options, placeholder, label, inp
 export function CellEditor({ tx, field, suggestions = [], onCommit, onCancel }) {
   const accountOptions = useAccountOptions(tx.account);
   const initial = field === 'date' ? toDisplayDate(tx.date)
-    : field === 'amount' ? String(tx.amount)
+    : field === 'amount' ? String(tx.original_amount ?? tx.amount)   // as entered, in its account's currency
     : String(tx[field] ?? '');
   const [draft, setDraft] = useState(initial);
   const done = useRef(false);

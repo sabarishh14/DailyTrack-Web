@@ -1,5 +1,5 @@
 import { API } from '../../constants';
-import { getToken, fmt, formatDate } from '../../utils';
+import { getToken, fmt, formatDate, enteredAmount, fmtMoney, isForeignCurrency } from '../../utils';
 import { useAccess } from '../../access/AccessContext';
 
 export default function TransactionDetailsModal({
@@ -27,9 +27,11 @@ export default function TransactionDetailsModal({
             </div>
             <div style={{ textAlign: 'right' }}>
               <span className={actionMenuTx.type === 'Credit' ? 'pos' : actionMenuTx.type === 'Investment' ? 'blue-text' : actionMenuTx.type === 'Savings' ? 'accent' : 'neg'} style={{ fontSize: '1.25rem', fontWeight: 'bold' }}>
-                {actionMenuTx.type === 'Credit' ? '+' : '-'}{fmt(actionMenuTx.amount)}
+                {actionMenuTx.type === 'Credit' ? '+' : '-'}{fmtMoney(enteredAmount(actionMenuTx), actionMenuTx.currency)}
               </span>
-              <span style={{ display: 'block', fontSize: '0.75rem', color: 'var(--text2)', marginTop: '2px' }}>{actionMenuTx.type}</span>
+              <span style={{ display: 'block', fontSize: '0.75rem', color: 'var(--text2)', marginTop: '2px' }}>
+                {actionMenuTx.type}{isForeignCurrency(actionMenuTx.currency) && ` · ${fmt(actionMenuTx.amount)}`}
+              </span>
             </div>
           </div>
         </div>
@@ -111,7 +113,7 @@ export default function TransactionDetailsModal({
                 const res = await fetch(`${API}/transactions/${actionMenuTx.id}`, {
                   method: "PUT",
                   headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${getToken()}` },
-                  body: JSON.stringify({ ...updatedTx, amount: parseFloat(updatedTx.amount) }),
+                  body: JSON.stringify({ ...updatedTx, amount: parseFloat(enteredAmount(updatedTx)) }),
                 });
                 if (res.ok) onRefresh();
               } catch (err) {

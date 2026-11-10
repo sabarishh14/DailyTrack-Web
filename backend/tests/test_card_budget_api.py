@@ -113,7 +113,7 @@ class CardBudgetApiTest(unittest.TestCase):
 
         self.assertEqual(under["cards"], [{"account": "CC-AXIS", "before": 0, "after": 600,
                                             "budget_before": 0, "budget_after": 600,
-                                            "monthly_budget": 1000, "over_budget": False}])
+                                            "monthly_budget": 1000, "over_budget": False, "currency": "INR"}])
         self.assertEqual(under["balances"], [])  # older apps read balances as money left
         self.assertTrue(over["cards"][0]["over_budget"])
         self.assertEqual(sent, [("card_budget", "CC-AXIS is over its monthly budget",

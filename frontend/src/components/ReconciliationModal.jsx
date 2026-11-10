@@ -6,7 +6,7 @@ import { getAuth, signInWithPopup, GoogleAuthProvider, signOut } from 'firebase/
 import SabDekho from '../pages/SabDekho';
 
 import { API } from '../constants';
-import { getToken, fmt, getBankEmoji, accountColor } from '../utils';
+import { getToken, fmtMoney, getBankEmoji, accountColor } from '../utils';
 
 export default function ReconciliationModal({ accounts, onClose, onRefresh }) {
   const [scanning, setScanning] = useState(false);
@@ -63,11 +63,11 @@ export default function ReconciliationModal({ accounts, onClose, onRefresh }) {
                 statusClass = "matched";
               } else if (diff < 0) {
                 // C4 - D4 < 0: Move money OUT of real account
-                status = `🔴 Reduce ${fmt(Math.abs(diff))}`;
+                status = `🔴 Reduce ${fmtMoney(Math.abs(diff), acc.currency)}`;
                 statusClass = "reduce";
               } else {
                 // C4 - D4 > 0: Move money INTO real account
-                status = `🟢 Increase ${fmt(Math.abs(diff))}`;
+                status = `🟢 Increase ${fmtMoney(Math.abs(diff), acc.currency)}`;
                 statusClass = "increase";
               }
 
@@ -78,10 +78,10 @@ export default function ReconciliationModal({ accounts, onClose, onRefresh }) {
                     <div className="reconcile-row-text">
                       <span className="reconcile-account-name">{acc.account}</span>
                       <span className="reconcile-row-figures">
-                        {fmt(tracked)}
+                        {fmtMoney(tracked, acc.currency)}
                         <span className="reconcile-arrow">→</span>
                         <span style={{ color: real !== null ? 'var(--accent2)' : 'var(--text3)' }}>
-                          {real !== null ? fmt(real) : "—"}
+                          {real !== null ? fmtMoney(real, acc.currency) : "—"}
                         </span>
                       </span>
                     </div>

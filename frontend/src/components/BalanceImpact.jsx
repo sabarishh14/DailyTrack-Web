@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { API, BANKS } from '../constants';
-import { fmt, getToken, isCcAccount, balanceDelta, evaluateMath, getBankEmoji, accountColor } from '../utils';
+import { fmt, getToken, isCcAccount, balanceDelta, evaluateMath, getBankEmoji, accountColor, fmtMoney, currencySymbol } from '../utils';
 
 // How close a balance is to its floor: 'danger' below it, 'warn' within half
 // the floor above it, otherwise 'ok'. Without a floor, only overdraft warns.
@@ -82,10 +82,10 @@ function FloorBar({ before, after, min, level }) {
   );
 }
 
-function floorNote(after, min, level) {
+function floorNote(after, min, level, currency) {
   if (min == null) return level === 'danger' ? 'Overdrawn' : null;
-  if (level === 'danger') return `${fmt(min - after)} below your ${fmt(min)} minimum`;
-  return `${fmt(after - min)} above minimum`;
+  if (level === 'danger') return `${fmtMoney(min - after, currency)} below your ${fmtMoney(min, currency)} minimum`;
+  return `${fmtMoney(after - min, currency)} above minimum`;
 }
 
 // Only the balances that matter right now: accounts the drafts use (with where
@@ -119,7 +119,7 @@ export function BalancesPanel({ accounts, projected, saved, projectedCards = {},
         const delta = after - before;
         const moved = Boolean(recent) || delta !== 0;
         const level = balanceLevel(after, min);
-        const note = floorNote(after, min, level);
+        const note = floorNote(after, min, level, a.currency);
         return (
           <div
             key={a.account}
@@ -131,13 +131,13 @@ export function BalancesPanel({ accounts, projected, saved, projectedCards = {},
               <span className="bal-chip-acc">{getBankEmoji(a.account)} {a.account}</span>
               {moved && delta !== 0 && (
                 <span className={`bal-chip-delta ${delta < 0 ? 'neg' : 'pos'}`}>
-                  {delta < 0 ? '−' : '+'}{fmt(Math.abs(delta))}{recent ? ' saved' : ''}
+                  {delta < 0 ? '−' : '+'}{fmtMoney(Math.abs(delta), a.currency)}{recent ? ' saved' : ''}
                 </span>
               )}
             </div>
             <div className="bal-chip-value">
-              {draft && delta !== 0 && <span className="bal-muted">{fmt(before)} →</span>}
-              <b>{level === 'danger' && moved ? '⚠ ' : ''}{fmt(after)}</b>
+              {draft && delta !== 0 && <span className="bal-muted">{fmtMoney(before, a.currency)} →</span>}
+              <b>{level === 'danger' && moved ? '⚠ ' : ''}{fmtMoney(after, a.currency)}</b>
             </div>
             {(moved || min != null) && <FloorBar before={Math.max(before, after)} after={after} min={min} level={level} />}
           </div>
@@ -155,8 +155,8 @@ export function BalancesPanel({ accounts, projected, saved, projectedCards = {},
         const moved = Boolean(recent) || delta !== 0;
         const level = cardLevel(counted, budget);
         const note = budget == null ? null
-          : level === 'danger' ? `${fmt(counted - budget)} over your ${fmt(budget)} monthly budget`
-          : `${fmt(budget - counted)} left of your ${fmt(budget)} monthly budget`;
+          : level === 'danger' ? `${fmtMoney(counted - budget, a.currency)} over your ${fmtMoney(budget, a.currency)} monthly budget`
+          : `${fmtMoney(budget - counted, a.currency)} left of your ${fmtMoney(budget, a.currency)} monthly budget`;
         return (
           <div
             key={a.account}
@@ -169,13 +169,13 @@ export function BalancesPanel({ accounts, projected, saved, projectedCards = {},
               {moved && delta !== 0 && (
                 // More used on a card is money going out.
                 <span className={`bal-chip-delta ${delta > 0 ? 'neg' : 'pos'}`}>
-                  {delta > 0 ? '+' : '−'}{fmt(Math.abs(delta))}{recent ? ' saved' : ''}
+                  {delta > 0 ? '+' : '−'}{fmtMoney(Math.abs(delta), a.currency)}{recent ? ' saved' : ''}
                 </span>
               )}
             </div>
             <div className="bal-chip-value">
-              {draft && delta !== 0 && <span className="bal-muted">{fmt(before)} →</span>}
-              <b>{level === 'danger' && moved ? '⚠ ' : ''}{fmt(after)}</b>
+              {draft && delta !== 0 && <span className="bal-muted">{fmtMoney(before, a.currency)} →</span>}
+              <b>{level === 'danger' && moved ? '⚠ ' : ''}{fmtMoney(after, a.currency)}</b>
               <span className="bal-muted"> used this month</span>
             </div>
             {/* Filling towards the budget; once over, the tick marks where it was. */}
@@ -190,7 +190,7 @@ export function BalancesPanel({ accounts, projected, saved, projectedCards = {},
 // One amount saved on an account (field: its minimum or a card's monthly
 // budget), shown as a chip that turns into an input when clicked. Editable
 // only for full-money users; blank clears it.
-function AccountAmountChip({ account, field, value: saved, editable, onSaved, inputLabel, label, emptyLabel, hint, noun }) {
+function AccountAmountChip({ account, field, value: saved, editable, onSaved, inputLabel, label, emptyLabel, hint, noun, currency }) {
   const [editing, setEditing] = useState(false);
   const [value, setValue] = useState(saved ?? '');
   const [saving, setSaving] = useState(false);
@@ -221,7 +221,7 @@ function AccountAmountChip({ account, field, value: saved, editable, onSaved, in
   if (editing) {
     return (
       <div className="min-chip editing" onClick={e => e.stopPropagation()}>
-        <span>{inputLabel} ₹</span>
+        <span>{inputLabel} {currencySymbol(currency).trim()}</span>
         <input
           autoFocus type="number" inputMode="decimal" value={value} placeholder="none"
           onChange={e => setValue(e.target.value)}
@@ -246,24 +246,25 @@ function AccountAmountChip({ account, field, value: saved, editable, onSaved, in
 }
 
 // The floor under an account card.
-export function MinBalanceChip({ account, min, editable, onSaved }) {
+export function MinBalanceChip({ account, min, editable, onSaved, currency }) {
   return (
     <AccountAmountChip
       account={account} field="min_balance" value={min} editable={editable} onSaved={onSaved}
-      inputLabel="Min" label={min != null ? `Min ${fmt(min)}` : null} emptyLabel="+ Set minimum"
+      currency={currency}
+      inputLabel="Min" label={min != null ? `Min ${fmtMoney(min, currency)}` : null} emptyLabel="+ Set minimum"
       hint="Set the minimum balance to keep in this account" noun="minimum"
     />
   );
 }
 
 // A credit card's monthly budget, read against what it's been used for this month.
-export function CardBudgetChip({ account, budget, used, editable, onSaved }) {
+export function CardBudgetChip({ account, budget, used, editable, onSaved, currency }) {
   const over = budget != null && used > budget;
   return (
     <AccountAmountChip
       account={account} field="monthly_budget" value={budget} editable={editable} onSaved={onSaved}
-      inputLabel="Budget"
-      label={budget == null ? null : over ? `⚠ ${fmt(used - budget)} over ${fmt(budget)}` : `of ${fmt(budget)} budget`}
+      inputLabel="Budget" currency={currency}
+      label={budget == null ? null : over ? `⚠ ${fmtMoney(used - budget, currency)} over ${fmtMoney(budget, currency)}` : `of ${fmtMoney(budget, currency)} budget`}
       emptyLabel="+ Set monthly budget"
       hint="Set the most to spend on this card in a month; it starts again on the 1st" noun="budget"
     />

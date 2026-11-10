@@ -6,7 +6,7 @@ import { getAuth, signInWithPopup, GoogleAuthProvider, signOut } from 'firebase/
 import SabDekho from '../pages/SabDekho';
 
 import { API } from '../constants';
-import { accountOptions, evaluateMath, getToken, buildDescriptionIndex, categoriesForType, descriptionOptions } from '../utils';
+import { accountOptions, evaluateMath, getToken, buildDescriptionIndex, categoriesForType, descriptionOptions, enteredAmount } from '../utils';
 import { useLatestMoneyMeta, EMPTY_META } from '../api/money';
 import CustomSelect from './CustomSelect';
 import AutocompleteInput from './AutocompleteInput';
@@ -19,7 +19,7 @@ export default function EditTransactionModal({ tx, categories, onClose, onRefres
     account: tx.account,
     type: tx.type,
     heading: tx.heading,
-    amount: tx.amount,
+    amount: enteredAmount(tx),
     description: tx.description || '',
     exclude_analytics: tx.exclude_analytics || false
   });

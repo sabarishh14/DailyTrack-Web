@@ -6,7 +6,7 @@ import { getAuth, signInWithPopup, GoogleAuthProvider, signOut } from 'firebase/
 import SabDekho from '../pages/SabDekho';
 
 import { API } from '../constants';
-import { accountOptions, evaluateMath, getToken, buildDescriptionIndex, categoriesForType, descriptionOptions } from '../utils';
+import { accountOptions, evaluateMath, getToken, buildDescriptionIndex, categoriesForType, descriptionOptions, enteredAmount } from '../utils';
 import { useLatestMoneyMeta, EMPTY_META } from '../api/money';
 import CustomSelect from './CustomSelect';
 import AutocompleteInput from './AutocompleteInput';
@@ -18,6 +18,7 @@ export default function BulkEditTransactionModal({ transactions, categories, onC
   const [rows, setRows] = useState(
     transactions.map(tx => ({
       ...tx,
+      amount: enteredAmount(tx),
       date: isCopy ? new Date().toISOString().split('T')[0] : (tx.date ? new Date(tx.date).toISOString().split('T')[0] : ''),
       exclude_analytics: isCopy ? (tx.exclude_analytics || false) : (tx.exclude_analytics || false)
     }))
