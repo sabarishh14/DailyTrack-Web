@@ -569,6 +569,9 @@ function SabDekhoSection({ showMovies, toggleShowMovies, canSync, lbxUsername, s
   );
 }
 
+// Letterboxd's page that makes the export ZIP (signed in there).
+const LETTERBOXD_EXPORT = 'https://letterboxd.com/user/exportdata';
+
 /** A Letterboxd data export (its ZIP, or diary.csv) into the diary, with progress. */
 function LetterboxdImport() {
   const [status, setStatus] = useState(null);
@@ -617,7 +620,10 @@ function LetterboxdImport() {
   };
 
   return (
-    <Row icon="📦" title="Import Letterboxd export" desc="Your whole diary, with ratings, reviews, likes and tags. Letterboxd → Settings → Import & Export → Export your data." status={status}>
+    <Row
+      icon="📦" title="Import Letterboxd export" status={status}
+      desc={<>Your whole diary, with ratings, reviews, likes and tags. <a href={LETTERBOXD_EXPORT} target="_blank" rel="noreferrer">Download your export ↗</a></>}
+    >
       <input ref={fileRef} type="file" accept=".zip,.csv" hidden onChange={e => run(e.target.files[0])} />
       <button className="action-btn secondary" onClick={() => fileRef.current?.click()} disabled={busy}>
         {busy ? 'Importing…' : 'Choose file'}

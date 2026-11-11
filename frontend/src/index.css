@@ -9899,6 +9899,15 @@ input[type="date"]::-webkit-calendar-picker-indicator {
 .st-status.ok { color: var(--pos) !important; }
 .st-status.error { color: var(--neg) !important; }
 
+.st-row-text a {
+  color: var(--accent);
+  font-weight: 600;
+  text-decoration: none;
+  white-space: nowrap;
+}
+
+.st-row-text a:hover { text-decoration: underline; }
+
 .st-row-action {
   flex-shrink: 0;
   display: flex;
