@@ -6408,6 +6408,86 @@ input[type="date"]::-webkit-calendar-picker-indicator {
   .table-row .snap-del:focus-visible { opacity: 1; }
 }
 
+/* ─── Theatre trips by year: popcorn buckets (StatsView's TheatreYears) ─── */
+.popcorn-chart {
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  gap: 0.75rem;
+  overflow-x: auto;
+  padding: 2.4rem 0.25rem 0.25rem;
+}
+
+.popcorn-col {
+  flex: 1 0 44px;
+  max-width: 90px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+.popcorn-count {
+  position: absolute;
+  bottom: calc(100% + 12px);
+  left: 50%;
+  transform: translateX(-50%);
+  font-weight: 800;
+  font-size: 0.85rem;
+  color: var(--text);
+  white-space: nowrap;
+}
+
+.popcorn-slot {
+  height: 160px;
+  width: 100%;
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  border-bottom: 2px solid var(--border);
+}
+
+/* Red and white stripes, narrower at the bottom like a real bucket. */
+.popcorn-bucket-wrap {
+  position: relative;
+  width: 78%;
+  transform-origin: bottom;
+  animation: statsBarGrow 0.8s cubic-bezier(0.2, 0.8, 0.2, 1) both;
+  animation-delay: var(--grow-delay, 0ms);
+}
+
+.popcorn-bucket {
+  position: absolute;
+  inset: 0;
+  background: repeating-linear-gradient(90deg, #e53935 0 7px, #fbeee0 7px 14px);
+  box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.08);
+  clip-path: polygon(0 0, 100% 0, 88% 100%, 12% 100%);
+}
+
+/* Popcorn piled over the rim (outside the clipped bucket). */
+.popcorn-top {
+  position: absolute;
+  left: -4%;
+  right: -4%;
+  top: -11px;
+  height: 14px;
+  background:
+    radial-gradient(circle at 12% 70%, #fff3c4 0 5px, transparent 6px),
+    radial-gradient(circle at 30% 40%, #ffe48a 0 6px, transparent 7px),
+    radial-gradient(circle at 50% 65%, #fff3c4 0 6px, transparent 7px),
+    radial-gradient(circle at 70% 35%, #ffe48a 0 6px, transparent 7px),
+    radial-gradient(circle at 88% 70%, #fff3c4 0 5px, transparent 6px);
+}
+
+/* On a light page the white stripes need an edge. */
+:root[data-theme="light"] .popcorn-bucket-wrap { filter: drop-shadow(0 1px 1px rgba(0, 0, 0, 0.18)); }
+
+.popcorn-year {
+  margin-top: 0.45rem;
+  font-size: 0.72rem;
+  font-weight: 600;
+  color: var(--text2);
+}
+
 /* ─── FINESSE: bars grow in, the busiest stands out, every bar is a link ─── */
 .stats-grow {
   transform-origin: bottom;

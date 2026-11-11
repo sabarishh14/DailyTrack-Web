@@ -564,7 +564,64 @@ function SabDekhoSection({ showMovies, toggleShowMovies, canSync, lbxUsername, s
           </form>
         </Row>
       )}
+      {showMovies && canSync && <LetterboxdImport />}
     </div>
+  );
+}
+
+/** A Letterboxd data export (its ZIP, or diary.csv) into the diary, with progress. */
+function LetterboxdImport() {
+  const [status, setStatus] = useState(null);
+  const [busy, setBusy] = useState(false);
+  const fileRef = useRef(null);
+
+  const run = async (file) => {
+    if (!file) return;
+    setBusy(true);
+    setStatus({ text: 'Reading your export…' });
+    try {
+      const form = new FormData();
+      form.append('file', file);
+      const res = await fetch(`${API}/movies/import/letterboxd`, {
+        method: 'POST', headers: { 'Authorization': `Bearer ${getToken()}` }, body: form,
+      });
+      if (!res.ok && !res.body) throw new Error(`Server returned ${res.status}`);
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = '', last = null;
+      for (;;) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split('\n');
+        buffer = lines.pop();
+        for (const line of lines.filter(l => l.trim())) {
+          last = JSON.parse(line);
+          if (last.status && last.status !== 'complete') setStatus({ text: last.status });
+        }
+      }
+      if (buffer.trim()) last = JSON.parse(buffer);
+      if (!last || last.success === false) throw new Error(last?.message || "Couldn't import");
+      const parts = [`${last.added_logs} ${last.added_logs === 1 ? 'watch' : 'watches'} added`];
+      if (last.updated_logs) parts.push(`${last.updated_logs} filled in`);
+      if (last.skipped) parts.push(`${last.skipped} not found`);
+      setStatus({ kind: 'ok', text: parts.join(' · ') });
+      window.dispatchEvent(new Event('dt:letterboxd-synced'));
+    } catch (e) {
+      setStatus({ kind: 'error', text: e.message });
+    } finally {
+      setBusy(false);
+      if (fileRef.current) fileRef.current.value = '';
+    }
+  };
+
+  return (
+    <Row icon="📦" title="Import Letterboxd export" desc="Your whole diary, with ratings, reviews, likes and tags. Letterboxd → Settings → Import & Export → Export your data." status={status}>
+      <input ref={fileRef} type="file" accept=".zip,.csv" hidden onChange={e => run(e.target.files[0])} />
+      <button className="action-btn secondary" onClick={() => fileRef.current?.click()} disabled={busy}>
+        {busy ? 'Importing…' : 'Choose file'}
+      </button>
+    </Row>
   );
 }
 

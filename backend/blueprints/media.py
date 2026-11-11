@@ -15,6 +15,7 @@ from access import require_api_key, require_admin, require_access, current_acces
 from tenancy import data_owner
 
 from sqlalchemy.orm import joinedload
+import letterboxd_export
 import xml.etree.ElementTree as ET
 from html import unescape
 from flask import stream_with_context, Response
@@ -1269,7 +1270,8 @@ def get_movie_stats():
                         'name': l.movie.name,
                         'poster_path': l.movie.poster_path,
                         'release_year': l.movie.release_year,
-                        'tags': movie_tags
+                        'tags': movie_tags,
+                        'year': l.date.year if l.date else None,   # when they went
                     }
                     # Left out rather than null while unrated: app builds up to
                     # 1.0.19 model it as a non-null number and drop the whole
@@ -1703,6 +1705,75 @@ def repair_letterboxd_reviews():
     return fixed
 
 
+def _tmdb_session():
+    session = requests.Session()
+    session.headers.update({
+        "accept": "application/json",
+        "Authorization": f"Bearer {TMDB_API_KEY}",
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"
+    })
+    return session
+
+
+def _find_or_add_film(film_title, film_year, tmdb_session, detail_checked, fast_mode=False):
+    """(film, 1 if it was added) for a Letterboxd title and year: the library's
+    film of that name, else TMDB's first match (an existing one by TMDB id, or a
+    new film with its details). (None, 0) when TMDB has nothing."""
+    import time
+    movie = Movie.query.filter_by(name=film_title).first()
+    if movie:
+        return movie, 0
+    time.sleep(0.1)  # Small delay
+    search_url = f"https://api.themoviedb.org/3/search/movie?query={requests.utils.quote(film_title)}"
+    if film_year:
+        search_url += f"&year={film_year}"
+    max_attempts = 1 if fast_mode else 3
+    timeout_secs = 3 if fast_mode else 10
+    tmdb_r = None
+    try:
+        for attempt in range(max_attempts):
+            try:
+                tmdb_r = tmdb_session.get(search_url, timeout=timeout_secs).json()
+                break
+            except requests.exceptions.ConnectionError:
+                if attempt == max_attempts - 1:
+                    print(f"Skipping {film_title} due to ConnectionError after {max_attempts} attempts")
+                else:
+                    time.sleep(1)  # wait longer before retry
+    except Exception as e:
+        print(f"Error fetching {film_title}: {e}")
+        return None, 0
+    if not (tmdb_r and tmdb_r.get('results')):
+        return None, 0
+    first_result = tmdb_r['results'][0]
+    tmdb_id = first_result['id']
+    movie = Movie.query.filter_by(tmdb_id=tmdb_id).first()
+    if not movie:
+        details = fetch_tmdb_movie_details(tmdb_id, session=tmdb_session, timeout=timeout_secs)
+        fallback_year = None
+        if first_result.get('release_date'):
+            try:
+                fallback_year = int(first_result['release_date'][:4])
+            except (TypeError, ValueError):
+                fallback_year = None
+        movie = Movie(
+            tmdb_id=tmdb_id,
+            name=first_result.get('title') or film_title,
+            poster_path=first_result.get('poster_path'),
+            status='WATCHED',
+            runtime=details["runtime"],
+            release_year=details["release_year"] or fallback_year,
+            release_date=details["release_date"] or first_result.get('release_date') or None,
+            director=details["director"],
+            top_cast=details["top_cast"],
+            language=details["language"],
+        )
+        db.session.add(movie)
+        db.session.flush()  # Get ID
+        detail_checked.add(movie.id)  # details were just fetched
+    return movie, 1
+
+
 def _perform_rss_sync_generator(username, fast_mode=False):
     import json
     yield json.dumps({"status": "Fetching RSS feed..."}) + "\n"
@@ -1728,12 +1799,7 @@ def _perform_rss_sync_generator(username, fast_mode=False):
         # Namespaces in Letterboxd RSS
         ns = {'letterboxd': 'https://letterboxd.com'}
     
-        tmdb_session = requests.Session()
-        tmdb_session.headers.update({
-            "accept": "application/json",
-            "Authorization": f"Bearer {TMDB_API_KEY}",
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"
-        })
+        tmdb_session = _tmdb_session()
 
         for i, item in enumerate(items):
             title = item.find('letterboxd:filmTitle', ns)
@@ -1769,65 +1835,10 @@ def _perform_rss_sync_generator(username, fast_mode=False):
             description_node = item.find('description')
             review_text = review_from_rss(description_node.text if description_node is not None else None)
 
-            # Check if this movie exists in our local DB by name (basic check first)
-            movie = Movie.query.filter_by(name=film_title).first()
-            if not movie:
-                # Query TMDB
-                import time
-                time.sleep(0.1) # Small delay
-            
-                search_url = f"https://api.themoviedb.org/3/search/movie?query={requests.utils.quote(film_title)}"
-                if film_year:
-                    search_url += f"&year={film_year}"
-            
-                try:
-                    max_attempts = 1 if fast_mode else 3
-                    timeout_secs = 3 if fast_mode else 10
-                    for attempt in range(max_attempts):
-                        try:
-                            tmdb_r = tmdb_session.get(search_url, timeout=timeout_secs).json()
-                            break
-                        except requests.exceptions.ConnectionError:
-                            if attempt == max_attempts - 1:
-                                print(f"Skipping {film_title} due to ConnectionError after {max_attempts} attempts")
-                                tmdb_r = None
-                            else:
-                                time.sleep(1) # wait longer before retry
-                except Exception as e:
-                    print(f"Error fetching {film_title}: {e}")
-                    continue
-                
-                if tmdb_r and tmdb_r.get('results'):
-                    first_result = tmdb_r['results'][0]
-                    tmdb_id = first_result['id']
-                    movie = Movie.query.filter_by(tmdb_id=tmdb_id).first()
-                    if not movie:
-                        details = fetch_tmdb_movie_details(tmdb_id, session=tmdb_session, timeout=timeout_secs)
-                        fallback_year = None
-                        if first_result.get('release_date'):
-                            try:
-                                fallback_year = int(first_result['release_date'][:4])
-                            except (TypeError, ValueError):
-                                fallback_year = None
-
-                        movie = Movie(
-                            tmdb_id=tmdb_id,
-                            name=first_result.get('title') or film_title,
-                            poster_path=first_result.get('poster_path'),
-                            status='WATCHED',
-                            runtime=details["runtime"],
-                            release_year=details["release_year"] or fallback_year,
-                            release_date=details["release_date"] or first_result.get('release_date') or None,
-                            director=details["director"],
-                            top_cast=details["top_cast"],
-                            language=details["language"],
-                        )
-                        db.session.add(movie)
-                        db.session.flush() # Get ID
-                        detail_checked.add(movie.id)  # details were just fetched
-                    added_movies += 1
-                else:
-                    continue # Couldn't find in TMDB
+            movie, added = _find_or_add_film(film_title, film_year, tmdb_session, detail_checked, fast_mode)
+            if movie is None:
+                continue  # Couldn't find in TMDB
+            added_movies += added
         
             # Fill in details older imports never stored, so stats like Newest
             # Release have a real date to work with. Only runs while something
@@ -1887,6 +1898,73 @@ def _perform_rss_sync_generator(username, fast_mode=False):
         traceback.print_exc()
         print("RSS SYNC ERROR", repr(e))
         yield json.dumps({"success": False, "message": str(e)}) + "\n"
+
+def _perform_csv_import_generator(entries):
+    """Letterboxd export entries (letterboxd_export.parse) as diary logs: each
+    film found or added like the RSS sync does; a watch already logged that day
+    only fills in what it lacks, so importing again adds nothing."""
+    yield json.dumps({"status": f"Found {len(entries)} watches. Matching films..."}) + "\n"
+    try:
+        tmdb_session = _tmdb_session()
+        detail_checked, films = set(), {}
+        added_movies = added_logs = updated_logs = skipped = 0
+        for i, e in enumerate(entries):
+            if i % 10 == 0:
+                yield json.dumps({"status": f"Importing {i + 1}/{len(entries)}: {e['title']}...",
+                                  "progress": i / max(len(entries), 1)}) + "\n"
+            key = (e["title"].lower(), e["year"])
+            if key not in films:
+                films[key] = _find_or_add_film(e["title"], e["year"], tmdb_session, detail_checked)
+                added_movies += films[key][1]
+            movie = films[key][0]
+            if movie is None:
+                skipped += 1
+                continue
+            if movie.status != 'WATCHED':
+                movie.status = 'WATCHED'
+            log = MovieDiaryLog.query.filter_by(movie_id=movie.id, date=e["date"]).first()
+            if log is None:
+                db.session.add(MovieDiaryLog(movie_id=movie.id, date=e["date"], rating=e["rating"],
+                                             rewatch=e["rewatch"], liked=e["liked"],
+                                             review=e["review"], tags=e["tags"]))
+                added_logs += 1
+            else:
+                changed = False
+                for field in ("rating", "review", "tags"):
+                    if e[field] and not getattr(log, field):
+                        setattr(log, field, e[field])
+                        changed = True
+                if e["liked"] and not log.liked:
+                    log.liked = changed = True
+                updated_logs += changed
+            if i % 50 == 49:
+                db.session.commit()
+        db.session.commit()
+        invalidate_stats_cache()
+        yield json.dumps({"status": "complete", "success": True, "added_movies": added_movies,
+                          "added_logs": added_logs, "updated_logs": updated_logs, "skipped": skipped}) + "\n"
+    except Exception as e:
+        db.session.rollback()
+        import traceback
+        traceback.print_exc()
+        yield json.dumps({"success": False, "message": str(e)}) + "\n"
+
+
+@media_bp.route('/api/movies/import/letterboxd', methods=['POST'])
+@require_access("sabdekho")
+def import_letterboxd_export():
+    """A Letterboxd data export (its ZIP, or diary.csv on its own) into the diary."""
+    upload = request.files.get('file')
+    if upload is None:
+        return jsonify({"success": False, "message": "Choose your Letterboxd export"}), 400
+    if not TMDB_API_KEY:
+        return jsonify({"success": False, "message": "TMDB API Key missing on server"}), 500
+    try:
+        entries = letterboxd_export.parse(upload.read(letterboxd_export.MAX_BYTES + 1), upload.filename or "")
+    except letterboxd_export.ExportError as e:
+        return jsonify({"success": False, "message": str(e)}), 400
+    return Response(stream_with_context(_perform_csv_import_generator(entries)), mimetype='application/x-ndjson')
+
 
 LETTERBOXD_NAME = re.compile(r"^[A-Za-z0-9_-]{1,40}$")
 

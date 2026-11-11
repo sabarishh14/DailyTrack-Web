@@ -183,6 +183,42 @@ export default function StatsView({ API, getToken, statsData, setStatsData, stat
 // MOVIE SECTIONS
 // ═══════════════════════════════════════════════════════════════════════
 
+// All time: theatre trips each year, as popcorn buckets filled to the count.
+export function TheatreYears({ visits }) {
+  const byYear = {};
+  (visits || []).forEach(v => { if (v.year) byYear[v.year] = (byYear[v.year] || 0) + 1; });
+  const years = Object.keys(byYear).map(Number);
+  if (years.length < 2) return null;
+  const first = Math.min(...years), last = Math.max(...years);
+  const rows = Array.from({ length: last - first + 1 }, (_, i) => ({ year: first + i, count: byYear[first + i] || 0 }));
+  const max = Math.max(...rows.map(r => r.count));
+  const best = rows.find(r => r.count === max);
+  return (
+    <div className="stats-section">
+      <div className="stats-section-header">
+        <span className="stats-section-title">🎟️ Theatre Trips by Year</span>
+        <span className="stats-section-hint">Best: {best.year} · {best.count} trips</span>
+      </div>
+      <div className="popcorn-chart">
+        {rows.map((r, i) => (
+          <div key={r.year} className="popcorn-col" title={`${r.year}: ${r.count} theatre ${r.count === 1 ? 'trip' : 'trips'}`}>
+            <div className="popcorn-slot">
+              {r.count > 0 && (
+                <div className="popcorn-bucket-wrap" style={{ height: `${Math.max(14, (r.count / max) * 100)}%`, '--grow-delay': `${i * 60}ms` }}>
+                  <span className="popcorn-bucket" />
+                  <span className="popcorn-top" />
+                  <span className="popcorn-count">{r.count === max ? `🍿 ${r.count}` : r.count}</span>
+                </div>
+              )}
+            </div>
+            <div className="popcorn-year">{r.year}</div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 function MovieStatsSections({ d, statsYear, openModal, onFilterLibrary }) {
   const [highestRatedFilter, setHighestRatedFilter] = useState('current'); // 'current' | 'older'
   const [theatreFilter, setTheatreFilter] = useState('all');
@@ -422,6 +458,8 @@ function MovieStatsSections({ d, statsYear, openModal, onFilterLibrary }) {
           )}
         </div>
       )}
+
+      {statsYear === 'all' && <TheatreYears visits={d.theatre_stats?.movies} />}
 
       {/* ─── BY WEEK ─── */}
       <WeekChart
