@@ -603,6 +603,7 @@ function LetterboxdImport() {
       if (buffer.trim()) last = JSON.parse(buffer);
       if (!last || last.success === false) throw new Error(last?.message || "Couldn't import");
       const parts = [`${last.added_logs} ${last.added_logs === 1 ? 'watch' : 'watches'} added`];
+      if (last.marked_watched) parts.push(`${last.marked_watched} more films marked watched`);
       if (last.updated_logs) parts.push(`${last.updated_logs} filled in`);
       if (last.skipped) parts.push(`${last.skipped} not found`);
       setStatus({ kind: 'ok', text: parts.join(' · ') });

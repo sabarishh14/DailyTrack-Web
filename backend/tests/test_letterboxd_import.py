@@ -31,19 +31,29 @@ REVIEWS = ("Date,Name,Year,Letterboxd URI,Rating,Rewatch,Review,Tags,Watched Dat
 LIKES = "Date,Name,Year,Letterboxd URI\n2026-03-20,Dune: Part Two,2024,https://boxd.it/x\n"
 
 
-def export_zip():
+WATCHED = ("Date,Name,Year,Letterboxd URI\n"
+           "2021-01-01,Dune: Part Two,2024,https://boxd.it/x\n"
+           "2021-01-01,Kaithi,2019,https://boxd.it/y\n")
+GONE = ("Date,Name,Year,Letterboxd URI,Rating,Rewatch,Tags,Watched Date\n"
+        "2025-01-01,Deleted Film,2020,https://boxd.it/z,1,,,2025-01-01\n")
+
+
+def export_zip(files=None, root=""):
+    """A Letterboxd export as it comes, deleted and orphaned copies too."""
+    files = files or {"diary.csv": DIARY, "reviews.csv": REVIEWS, "likes/films.csv": LIKES,
+                      "watched.csv": WATCHED, "watchlist.csv": "Date,Name,Year,Letterboxd URI\n",
+                      "deleted/diary.csv": GONE, "orphaned/diary.csv": GONE, "deleted/reviews.csv": REVIEWS}
     buf = io.BytesIO()
     with zipfile.ZipFile(buf, "w") as z:
-        z.writestr("diary.csv", DIARY)
-        z.writestr("reviews.csv", REVIEWS)
-        z.writestr("likes/films.csv", LIKES)
-        z.writestr("watchlist.csv", "Date,Name,Year,Letterboxd URI\n")
+        for name, text in files.items():
+            z.writestr(root + name, text)
     return buf.getvalue()
 
 
 class ParseTest(unittest.TestCase):
     def test_the_zip_joins_reviews_and_likes_to_the_diary(self):
-        entries = letterboxd_export.parse(export_zip(), "letterboxd.zip")
+        result = letterboxd_export.parse(export_zip(), "letterboxd.zip")
+        entries = result["watches"]
         self.assertEqual([(e["title"], e["date"]) for e in entries],
                          [("Dune: Part Two", date(2026, 3, 14)), ("Dune: Part Two", date(2026, 3, 19)),
                           ("Past Lives", date(2026, 4, 1))])
@@ -51,10 +61,22 @@ class ParseTest(unittest.TestCase):
         self.assertEqual((first["rating"], first["tags"], first["liked"]), (4.5, "overall-theatres,theatres-pvr", False))
         self.assertEqual((second["rewatch"], second["review"], second["liked"]), (True, "Even better, twice.", True))
         self.assertEqual((third["rating"], third["review"]), (None, None))
+        self.assertEqual(result["watched"], [("Kaithi", "2019")])    # watched, never logged
+
+    def test_deleted_and_orphaned_copies_are_left_out(self):
+        for root in ("", "letterboxd-someone-2026/"):           # however the ZIP is laid out
+            titles = {e["title"] for e in letterboxd_export.parse(export_zip(root=root))["watches"]}
+            self.assertEqual(titles, {"Dune: Part Two", "Past Lives"})
+
+    def test_only_marked_watched_still_imports(self):
+        empty_diary = "Date,Name,Year,Letterboxd URI,Rating,Rewatch,Tags,Watched Date\n"
+        result = letterboxd_export.parse(export_zip({"diary.csv": empty_diary, "watched.csv": WATCHED}))
+        self.assertEqual((result["watches"], result["watched"]),
+                         ([], [("Dune: Part Two", "2024"), ("Kaithi", "2019")]))
 
     def test_diary_csv_alone(self):
-        entries = letterboxd_export.parse(("﻿" + DIARY).encode(), "diary.csv")
-        self.assertEqual(len(entries), 3)
+        result = letterboxd_export.parse(("﻿" + DIARY).encode(), "diary.csv")
+        self.assertEqual(len(result["watches"]), 3)
 
     def test_what_isnt_an_export_says_so(self):
         for data in (b"just,some,columns\n1,2,3\n", b"PK\x03\x04broken"):
@@ -99,14 +121,16 @@ class ImportApiTest(unittest.TestCase):
 
     def test_watches_become_diary_logs_once(self):
         status, done = self.upload(export_zip())
-        self.assertEqual((status, done["added_movies"], done["added_logs"]), (200, 2, 3))
+        self.assertEqual((status, done["added_movies"], done["added_logs"], done["marked_watched"]), (200, 3, 3, 1))
         with self.app.app_context():
             logs = {(l.movie.name, l.date): l for l in MovieDiaryLog.query.all()}
             rewatch = logs[("Dune: Part Two", date(2026, 3, 19))]
             self.assertEqual((rewatch.rating, rewatch.rewatch, rewatch.liked, rewatch.review), (5, True, True, "Even better, twice."))
             self.assertEqual(logs[("Dune: Part Two", date(2026, 3, 14))].tags, "overall-theatres,theatres-pvr")
+            kaithi = Movie.query.filter_by(name="Kaithi").one()     # marked watched: in the library, no diary
+            self.assertEqual((kaithi.status, kaithi.diary_logs), ("WATCHED", []))
         _, again = self.upload(export_zip())
-        self.assertEqual((again["added_logs"], again["updated_logs"]), (0, 0))
+        self.assertEqual((again["added_movies"], again["added_logs"], again["updated_logs"], again["marked_watched"]), (0, 0, 0, 0))
 
     def test_not_an_export(self):
         status, body = self.upload(b"nope", "notes.txt")

@@ -1899,29 +1899,38 @@ def _perform_rss_sync_generator(username, fast_mode=False):
         print("RSS SYNC ERROR", repr(e))
         yield json.dumps({"success": False, "message": str(e)}) + "\n"
 
-def _perform_csv_import_generator(entries):
-    """Letterboxd export entries (letterboxd_export.parse) as diary logs: each
-    film found or added like the RSS sync does; a watch already logged that day
-    only fills in what it lacks, so importing again adds nothing."""
-    yield json.dumps({"status": f"Found {len(entries)} watches. Matching films..."}) + "\n"
+def _perform_csv_import_generator(export):
+    """A Letterboxd export (letterboxd_export.parse) into SabDekho: each diary
+    watch a diary log, and films only marked watched into the library as
+    watched (no date to log). Films are found or added like the RSS sync does;
+    a watch already logged that day only fills in what it lacks, so importing
+    again adds nothing."""
+    watches, watched = export["watches"], export["watched"]
+    total = len(watches) + len(watched)
+    yield json.dumps({"status": f"Found {len(watches)} diary watches and {len(watched)} more films. Matching..."}) + "\n"
     try:
         tmdb_session = _tmdb_session()
         detail_checked, films = set(), {}
-        added_movies = added_logs = updated_logs = skipped = 0
-        for i, e in enumerate(entries):
-            if i % 10 == 0:
-                yield json.dumps({"status": f"Importing {i + 1}/{len(entries)}: {e['title']}...",
-                                  "progress": i / max(len(entries), 1)}) + "\n"
-            key = (e["title"].lower(), e["year"])
+        added_movies = added_logs = updated_logs = marked = skipped = 0
+
+        def film(title, year):
+            key = (title.lower(), year)
             if key not in films:
-                films[key] = _find_or_add_film(e["title"], e["year"], tmdb_session, detail_checked)
+                films[key] = _find_or_add_film(title, year, tmdb_session, detail_checked)
+                nonlocal added_movies
                 added_movies += films[key][1]
             movie = films[key][0]
+            if movie is not None and movie.status != 'WATCHED':
+                movie.status = 'WATCHED'
+            return movie
+
+        for i, e in enumerate(watches):
+            if i % 10 == 0:
+                yield json.dumps({"status": f"Importing {i + 1}/{total}: {e['title']}...", "progress": i / total}) + "\n"
+            movie = film(e["title"], e["year"])
             if movie is None:
                 skipped += 1
                 continue
-            if movie.status != 'WATCHED':
-                movie.status = 'WATCHED'
             log = MovieDiaryLog.query.filter_by(movie_id=movie.id, date=e["date"]).first()
             if log is None:
                 db.session.add(MovieDiaryLog(movie_id=movie.id, date=e["date"], rating=e["rating"],
@@ -1939,10 +1948,25 @@ def _perform_csv_import_generator(entries):
                 updated_logs += changed
             if i % 50 == 49:
                 db.session.commit()
+
+        for j, (title, year) in enumerate(watched):
+            i = len(watches) + j
+            if i % 10 == 0:
+                yield json.dumps({"status": f"Importing {i + 1}/{total}: {title}...", "progress": i / total}) + "\n"
+            known = (title.lower(), year) in films
+            movie = film(title, year)
+            if movie is None:
+                skipped += 1
+            elif not known and films[(title.lower(), year)][1]:
+                marked += 1     # newly in the library
+            if j % 50 == 49:
+                db.session.commit()
+
         db.session.commit()
         invalidate_stats_cache()
         yield json.dumps({"status": "complete", "success": True, "added_movies": added_movies,
-                          "added_logs": added_logs, "updated_logs": updated_logs, "skipped": skipped}) + "\n"
+                          "added_logs": added_logs, "updated_logs": updated_logs, "marked_watched": marked,
+                          "skipped": skipped}) + "\n"
     except Exception as e:
         db.session.rollback()
         import traceback
@@ -1960,10 +1984,10 @@ def import_letterboxd_export():
     if not TMDB_API_KEY:
         return jsonify({"success": False, "message": "TMDB API Key missing on server"}), 500
     try:
-        entries = letterboxd_export.parse(upload.read(letterboxd_export.MAX_BYTES + 1), upload.filename or "")
+        export = letterboxd_export.parse(upload.read(letterboxd_export.MAX_BYTES + 1), upload.filename or "")
     except letterboxd_export.ExportError as e:
         return jsonify({"success": False, "message": str(e)}), 400
-    return Response(stream_with_context(_perform_csv_import_generator(entries)), mimetype='application/x-ndjson')
+    return Response(stream_with_context(_perform_csv_import_generator(export)), mimetype='application/x-ndjson')
 
 
 LETTERBOXD_NAME = re.compile(r"^[A-Za-z0-9_-]{1,40}$")
