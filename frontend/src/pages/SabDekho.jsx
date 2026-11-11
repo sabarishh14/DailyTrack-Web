@@ -467,7 +467,7 @@ const [view, setView] = useState('library'); // library | diary | stats
           // Movies are always 1:1, a PUT is perfectly fine
           await fetch(`${API}${endpoint}`, {
             method: 'PUT', headers: hdrs(),
-            body: JSON.stringify({ log_ids: editingLogIds, rating: logRating || null, review: logReview || null, liked: logLiked, rewatch: logRewatch, tags: logTags.trim() || null })
+            body: JSON.stringify({ log_ids: editingLogIds, date: logDate, rating: logRating || null, review: logReview || null, liked: logLiked, rewatch: logRewatch, tags: logTags.trim() || null })
           });
         }
       }
