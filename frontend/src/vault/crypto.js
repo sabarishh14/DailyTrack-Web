@@ -4,7 +4,7 @@
 //
 //   passphrase ──PBKDF2-SHA256──▶ key ──AES-GCM──▶ wraps the data key
 //   recovery key ─PBKDF2-SHA256─▶ key ──AES-GCM──▶ wraps the data key too
-//   data key ──AES-256-GCM──▶ every item, and this person's ECDH private key
+//   data key ──AES-256-GCM──▶ every item, and this person's ECDH private key (JWK)
 //   a friend's public key + a one-off ECDH key ──HKDF──▶ wraps the data key for them
 //
 // Every sealed value says what it is (AAD: owner, purpose), so one can't be
@@ -107,7 +107,9 @@ export async function createKeys(owner, passphrase, recoveryKey) {
   const dk = await aesKey(dataKey);
   const pair = await subtle().generateKey({ name: 'ECDH', namedCurve: 'P-256' }, true, ['deriveBits']);
   const pub = new Uint8Array(await subtle().exportKey('raw', pair.publicKey));
-  const priv = new Uint8Array(await subtle().exportKey('pkcs8', pair.privateKey));
+  // The private key as its numbers (JWK: d, x, y), which the phone reads as easily.
+  const { d, x, y } = await subtle().exportKey('jwk', pair.privateKey);
+  const priv = enc.encode(JSON.stringify({ kty: 'EC', crv: 'P-256', d, x, y }));
   return {
     dataKey,
     keys: {
@@ -168,8 +170,8 @@ export async function grantFor(owner, viewer, viewerPublicB64, dataKey) {
 
 /** A friend's data key, from their grant and this person's own keys. */
 export async function openGrant(owner, viewer, grant, myKeys, myDataKey) {
-  const pkcs8 = await open(await aesKey(myDataKey), myKeys.wrapped_private_key, viewer, 'private');
-  const priv = await subtle().importKey('pkcs8', pkcs8, ECDH, false, ['deriveBits']);
+  const jwk = JSON.parse(dec.decode(await open(await aesKey(myDataKey), myKeys.wrapped_private_key, viewer, 'private')));
+  const priv = await subtle().importKey('jwk', { ...jwk, ext: true }, ECDH, false, ['deriveBits']);
   const key = await grantKey(priv, fromB64(grant.ephemeral_key), owner, viewer);
   return open(key, grant.wrapped_key, owner, `grant|${viewer}`);
 }

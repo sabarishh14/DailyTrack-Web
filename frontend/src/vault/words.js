@@ -1,5 +1,6 @@
-// Short, distinct words for a suggested passphrase: 6 of 256 is 48 bits, and
-// with 600,000 rounds of PBKDF2 per guess that's far out of reach.
+// Short, distinct words for a suggested passphrase: 6 of these 270 is about 48
+// bits, each guess costing 600,000 rounds of PBKDF2. The phone has the same list
+// (VaultWords.kt).
 const WORDS = (
   'acorn admiral amber anchor apple april arcade arrow atlas autumn avocado badge bakery bamboo banjo barley ' +
   'basket beacon beetle berry bicycle biscuit blanket blossom bonfire bottle bramble breeze brick bridge bubble bucket ' +
