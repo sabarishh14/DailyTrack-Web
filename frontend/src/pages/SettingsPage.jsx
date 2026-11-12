@@ -10,6 +10,7 @@ import BudgetManagerModal from '../components/BudgetManagerModal';
 import CategoryExclusionModal from '../components/CategoryExclusionModal';
 import AddAccountModal from './settings-components/AddAccountModal';
 import { searchRank } from '../utils/search';
+import { VaultSettings } from '../components/Vault';
 
 // Everything you can set on the web, in one place. [keywords] feed the search box.
 const SECTIONS = [
@@ -34,9 +35,10 @@ const SECTIONS = [
     show: (a) => a.isOwner,
   },
   {
-    id: 'invest', icon: '📈', title: 'Investments', desc: 'How your Kite holdings are valued',
-    keywords: 'kite zerodha stocks shares mutual funds mf portfolio daily manual sync prices nav value',
-    show: (a) => a.isOwner && a.can('invest', 'edit'),
+    id: 'invest', icon: '📈', title: 'Investments', desc: 'Keeping them private, and how Kite is valued',
+    keywords: 'kite zerodha stocks shares mutual funds mf portfolio daily manual sync prices nav value private vault encrypt encryption passphrase privacy lock admin recovery key',
+    // The vault is your own, so not while viewing someone else's data.
+    show: (a) => a.can('invest', 'edit') && !a.raw?.viewing,
   },
   {
     id: 'sabdekho', icon: '🎬', title: 'SabDekho', desc: 'Films and Letterboxd',
@@ -164,7 +166,7 @@ export default function SettingsPage(props) {
               {s.id === 'accounts' && <AccountsSection accounts={props.accounts} onRefresh={props.onRefresh} onToast={setToast} />}
               {s.id === 'appearance' && <AppearanceSection {...props} />}
               {s.id === 'money' && <MoneySection {...props} full={access.isOwner} onToast={setToast} />}
-              {s.id === 'invest' && <InvestSection onRefresh={props.onRefresh} onToast={setToast} />}
+              {s.id === 'invest' && <InvestSection onRefresh={props.onRefresh} onToast={setToast} kite={access.isOwner} />}
               {s.id === 'sabdekho' && <SabDekhoSection {...props} canSync={access.can('sabdekho', 'edit')} />}
               {s.id === 'nagapandi' && <NagapandiSection {...props} />}
               {s.id === 'sharing' && <SharingSection viewAs={props.viewAs} onSwitchView={props.onSwitchView} onToast={setToast} />}
@@ -499,11 +501,12 @@ const KITE_MODES = [
   ['daily', 'Daily', 'Repriced every day. Sync Kite after you buy or sell.'],
 ];
 
-function InvestSection({ onRefresh, onToast }) {
+function InvestSection({ onRefresh, onToast, kite }) {
   const [mode, setMode] = useState(null);
   useEffect(() => {
+    if (!kite) return;
     apiGet('/auth/me').then(r => setMode(r.settings?.kite_valuation || 'manual')).catch(() => setMode('manual'));
-  }, []);
+  }, [kite]);
 
   const pick = async (next) => {
     if (next === mode) return;
@@ -526,7 +529,8 @@ function InvestSection({ onRefresh, onToast }) {
 
   return (
     <div className="st-card st-rows">
-      <Row icon="🪁" title="Kite holdings" desc={KITE_MODES.find(([id]) => id === mode)?.[2] || ' '}>
+      <VaultSettings Row={Row} onRefresh={onRefresh} onToast={onToast} />
+      {kite && <Row icon="🪁" title="Kite holdings" desc={KITE_MODES.find(([id]) => id === mode)?.[2] || ' '}>
         <div className="ac-seg" role="radiogroup" aria-label="Kite holdings">
           {KITE_MODES.map(([id, label]) => (
             <button
@@ -537,7 +541,7 @@ function InvestSection({ onRefresh, onToast }) {
             </button>
           ))}
         </div>
-      </Row>
+      </Row>}
     </div>
   );
 }
@@ -622,7 +626,7 @@ function LetterboxdImport() {
   return (
     <Row
       icon="📦" title="Import Letterboxd export" status={status}
-      desc={<>Your whole diary, with ratings, reviews, likes and tags. <a href={LETTERBOXD_EXPORT} target="_blank" rel="noreferrer">Download your export ↗</a></>}
+      desc={<>Your whole diary, with ratings, reviews, likes and tags. Watches tagged theatre or cinema count as theatre trips. <a href={LETTERBOXD_EXPORT} target="_blank" rel="noreferrer">Download your export ↗</a></>}
     >
       <input ref={fileRef} type="file" accept=".zip,.csv" hidden onChange={e => run(e.target.files[0])} />
       <button className="action-btn secondary" onClick={() => fileRef.current?.click()} disabled={busy}>

@@ -479,7 +479,7 @@ movie_tags: r.movie_tags,
 
               {row.heading.trim().toLowerCase() === 'cinema' && (
                 <div style={{ margin: '0.5rem 0 1rem 0', padding: '1rem', background: 'var(--bg2)', borderRadius: '8px', border: '1px dashed var(--accent)' }}>
-                  <div style={{ fontSize: '0.85rem', color: 'var(--text2)', marginBottom: '0.5rem' }}>🎬 Movie Tags</div>
+                  <div style={{ fontSize: '0.85rem', color: 'var(--text2)', marginBottom: '0.5rem' }}>🍿 Logged in SabDekho as a theatre trip · tags (optional)</div>
                   <TagPillInput
                     value={row.movie_tags}
                     onChange={tags => updateRow(row.id, 'movie_tags', tags)}

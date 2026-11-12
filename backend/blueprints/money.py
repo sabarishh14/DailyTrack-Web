@@ -885,7 +885,7 @@ def add_transaction():
         
         msg = f"Successfully added {added_count} transactions & updated balances!"
         if movie_link_successes:
-            msg += f"\n\n🎬 Successfully added tags for: {', '.join(movie_link_successes)}"
+            msg += f"\n\n🍿 Logged in SabDekho as theatre trips: {', '.join(movie_link_successes)}"
         if movie_link_errors:
             msg += f"\n\n⚠️ Warning: {', '.join(movie_link_errors)}"
             

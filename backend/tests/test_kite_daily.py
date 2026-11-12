@@ -4,6 +4,7 @@ sync replaces them. No network: Yahoo's prices and AMFI's NAVs are stand-ins.
 
     cd backend && python -m unittest tests.test_kite_daily
 """
+import contextlib
 import os
 import sys
 import unittest
@@ -82,6 +83,22 @@ class RepriceTest(KiteDailyCase):
         self.assertEqual((fund.isin, fund.nav, fund.repriced), ("INF879O01027", 90.0, True))
         # The sync's own day is left as it was.
         self.assertEqual([e.ltp for e in self.rows(EquityHolding, date=SYNCED)], [1500])
+
+    def test_a_later_day_on_the_same_holdings_takes_the_new_prices(self):
+        """Today's record (funds valued today) while the prices are still the last
+        trading day's close: it adds up the repriced stocks, not the sync's."""
+        from models import FundValue
+        self.kite_synced(OWNER, SYNCED)
+        later = TRADING_DAY + timedelta(days=1)
+        with self.app.app_context():
+            db.session.add(FundValue(id=9, owner_email=OWNER, date=later, amfi_code="120503", name="Axis ELSS", units=1,
+                                     nav=50, nav_date=TRADING_DAY, invested=40, value=50))
+            db.session.add(PortfolioSnapshot(id=9, owner_email=OWNER, date=later, total_equity_inv=2000, total_equity_curr=3000))
+            db.session.commit()
+        self.daily()
+        snaps = {s["date"]: s for s in self.ok("GET", "/api/investments", OWNER)}
+        self.assertEqual(snaps[TRADING_DAY.isoformat()]["curr_stocks"], 3200)
+        self.assertEqual(snaps[later.isoformat()]["curr_stocks"], 3200)
 
     def test_a_second_look_soon_after_asks_for_nothing(self):
         self.kite_synced(OWNER, SYNCED)
@@ -209,13 +226,17 @@ class SyncTest(KiteDailyCase):
                     {"tradingsymbol": "INFY", "quantity": 3, "average_price": 1000, "last_price": 1650,
                      "instrument_token": 408065}]},
             }
-            if "amfiindia" in url:
-                return mock.Mock(text="Scheme Code;ISIN Div Payout/ ISIN Growth;ISIN Div Reinvestment;Scheme Name;Plan;Option;Net Asset Value;Date\n"
-                                      "122639;INF879O01027;-;Parag Parikh Flexi Cap Fund;Direct Plan;Growth;91.0;22-Oct-2026")
             return mock.Mock(json=lambda: data[url])
         post = mock.Mock(return_value=mock.Mock(json=lambda: {"status": "success", "data": {"access_token": "t"}}))
-        return mock.patch.multiple(invest, requests=mock.Mock(get=get, post=post),
-                                   KITE_API_KEY="k", KITE_API_SECRET="s")
+        # AMFI's latest NAVs, as funds_service reads them.
+        amfi = funds_service.parse_amfi(
+            "Scheme Code;ISIN Div Payout/ ISIN Growth;ISIN Div Reinvestment;Scheme Name;Plan;Option;Net Asset Value;Date\n"
+            "122639;INF879O01027;-;Parag Parikh Flexi Cap Fund;Direct Plan;Growth;91.0;22-Oct-2026")
+        stack = contextlib.ExitStack()
+        stack.enter_context(mock.patch.multiple(invest, requests=mock.Mock(get=get, post=post),
+                                                KITE_API_KEY="k", KITE_API_SECRET="s"))
+        stack.enter_context(mock.patch.object(funds_service, "latest_navs", lambda *a, **k: amfi))
+        return stack
 
     def test_a_sync_replaces_todays_repriced_rows(self):
         self.kite_synced(OWNER, SYNCED)

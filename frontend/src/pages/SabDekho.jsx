@@ -31,6 +31,28 @@ function GridSizeIcon({ cols }) {
 }
 
 // ─── MAIN COMPONENT ─────────────────────────────────────────────────────
+// A theatre trip is a watch tagged overall-theatres or theatres-… (the server's
+// rule; Money's Cinema expenses add them too). The log form shows a switch for
+// it and keeps these tags out of the tag box.
+const isTheatreTag = (tag) => {
+  const key = tag.trim().toLowerCase();
+  return key === 'overall-theatres' || key.startsWith('theatres-');
+};
+const tagList = (tags) => (tags || '').split(',').map(t => t.trim()).filter(Boolean);
+/** The tags to show on a log: a theatre trip's own as one "🍿 Theatre", first. */
+const shownTags = (tags) => {
+  const all = tagList(tags);
+  return [...(all.some(isTheatreTag) ? ['🍿 Theatre'] : []), ...all.filter(t => !isTheatreTag(t))];
+};
+/** The tags a log saves: the box's, plus the theatre ones when switched on (year from the watch date). */
+const tagsToSave = (boxTags, theatre, kept, date) => {
+  const own = tagList(boxTags).filter(t => !isTheatreTag(t));
+  if (!theatre) return own.join(', ');
+  const year = `theatres-${(date || '').slice(0, 4)}`;
+  const extra = kept.filter(t => !/^theatres-\d{4}$/i.test(t) && t.toLowerCase() !== 'overall-theatres');
+  return [...own, 'overall-theatres', year, ...extra].join(', ');
+};
+
 function SabDekho({ API, getToken, showMovies, refreshTrigger }) {
   const canEdit = useAccess().can('sabdekho', 'edit');
 const [view, setView] = useState('library'); // library | diary | stats
@@ -59,6 +81,8 @@ const [view, setView] = useState('library'); // library | diary | stats
   const [logRating, setLogRating] = useState(0);
   const [logReview, setLogReview] = useState('');
   const [logTags, setLogTags] = useState('');
+  const [logTheatre, setLogTheatre] = useState(false);
+  const [logTheatreTags, setLogTheatreTags] = useState([]);   // an edited log's own, kept
   const [logLiked, setLogLiked] = useState(false);
   const [logRewatch, setLogRewatch] = useState(false);
   const [logSaving, setLogSaving] = useState(false);
@@ -291,6 +315,7 @@ const [view, setView] = useState('library'); // library | diary | stats
     setSelectedShow(show); setShowDetails(null); setShowDetailsLoading(true);
     setLogDate(new Date().toISOString().split('T')[0]);
     setLogSeasons([]); setLogEpisodes([]); setLogRating(0); setLogReview(''); setLogTags(''); setLogLiked(false);
+    setLogTheatre(false); setLogTheatreTags([]);
     setEditingLogIds(null);
     setEditingLog(null);
 
@@ -455,6 +480,7 @@ const [view, setView] = useState('library'); // library | diary | stats
       return;
     }
     setLogSaving(true);
+    const tags = tagsToSave(logTags, selectedShow.type === 'movie' && logTheatre, logTheatreTags, logDate) || null;
     try {
       const endpoint = selectedShow.type === 'movie' ? '/movies/diary' : '/tv/diary';
 
@@ -467,7 +493,7 @@ const [view, setView] = useState('library'); // library | diary | stats
           // Movies are always 1:1, a PUT is perfectly fine
           await fetch(`${API}${endpoint}`, {
             method: 'PUT', headers: hdrs(),
-            body: JSON.stringify({ log_ids: editingLogIds, date: logDate, rating: logRating || null, review: logReview || null, liked: logLiked, rewatch: logRewatch, tags: logTags.trim() || null })
+            body: JSON.stringify({ log_ids: editingLogIds, date: logDate, rating: logRating || null, review: logReview || null, liked: logLiked, rewatch: logRewatch, tags })
           });
         }
       }
@@ -485,7 +511,7 @@ const [view, setView] = useState('library'); // library | diary | stats
                   tv_show_id: selectedShow.id, date: logDate,
                   season_number: s, episode_number: ep,
                   rating: logRating || null, review: logReview || null,
-                  liked: logLiked, rewatch: logRewatch, tags: logTags.trim() || null
+                  liked: logLiked, rewatch: logRewatch, tags
                 })
               });
             }
@@ -497,7 +523,7 @@ const [view, setView] = useState('library'); // library | diary | stats
             body: JSON.stringify({
               movie_id: selectedShow.id, date: logDate,
               rating: logRating || null, review: logReview || null,
-              liked: logLiked, rewatch: logRewatch, tags: logTags.trim() || null
+              liked: logLiked, rewatch: logRewatch, tags
             })
           });
         }
@@ -557,7 +583,10 @@ const [view, setView] = useState('library'); // library | diary | stats
     setLogEpisodes(log.episodes || (log.episode_number != null ? [log.episode_number] : []));
     setLogRating(log.rating || 0);
     setLogReview(log.review || '');
-    setLogTags(log.tags || '');
+    const theatreTags = tagList(log.tags).filter(isTheatreTag);
+    setLogTags(tagList(log.tags).filter(t => !isTheatreTag(t)).join(', '));
+    setLogTheatre(theatreTags.length > 0);
+    setLogTheatreTags(theatreTags);
     setLogLiked(log.liked || false);
     setLogRewatch(log.rewatch || false);
   };
@@ -1071,7 +1100,7 @@ const [view, setView] = useState('library'); // library | diary | stats
                                 )}
                                 {log.tags && (
                                   <div className="tv-diary-tags-row">
-                                    {log.tags.split(',').map((t, i) => <span key={i} className="tv-diary-tag">{t.trim()}</span>)}
+                                    {shownTags(log.tags).map((t, i) => <span key={i} className="tv-diary-tag">{t}</span>)}
                                   </div>
                                 )}
                               </div>
@@ -1232,7 +1261,7 @@ const [view, setView] = useState('library'); // library | diary | stats
                       ✏️ Editing {editingLog.type === 'tv' ? (editingLog.season_number ? (editingLog.episode_number ? `S${editingLog.season_number} E${editingLog.episode_number}` : `Season ${editingLog.season_number}`) : 'Show') : 'Movie'} Log
                     </span>
                     <button onClick={() => {
-                      setEditingLog(null); setEditingLogIds([]); setLogRating(0); setLogReview(''); setLogTags(''); setLogLiked(false); setLogRewatch(false); setLogEpisodes([]); setLogSeasons([]);
+                      setEditingLog(null); setEditingLogIds([]); setLogRating(0); setLogReview(''); setLogTags(''); setLogTheatre(false); setLogTheatreTags([]); setLogLiked(false); setLogRewatch(false); setLogEpisodes([]); setLogSeasons([]);
                     }} style={{ background: 'var(--bg)', border: '1px solid var(--border)', color: 'var(--text)', cursor: 'pointer', fontSize: '0.75rem', fontWeight: 700, padding: '0.35rem 0.75rem', borderRadius: '6px' }}>Cancel</button>
                   </div>
                 )}
@@ -1306,6 +1335,15 @@ const [view, setView] = useState('library'); // library | diary | stats
                     <label>Review</label>
                     <textarea style={{ flexGrow: 1, minHeight: '120px', resize: 'vertical' }} value={logReview} onChange={e => setLogReview(e.target.value)} placeholder="What did you think?" />
                   </div>
+                  {selectedShow?.type === 'movie' && (
+                    <div className="tv-log-field tv-log-field-full">
+                      <button type="button" className={`tv-theatre-switch ${logTheatre ? 'on' : ''}`} aria-pressed={logTheatre}
+                              onClick={() => setLogTheatre(v => !v)}>
+                        <span aria-hidden="true">🍿</span> Watched in a theatre
+                        <span className="tv-theatre-knob" aria-hidden="true" />
+                      </button>
+                    </div>
+                  )}
                   <div className="tv-log-field tv-log-field-full">
                     <label>Tags</label>
                     {quickTags?.length > 0 && <div className="tv-ep-grid" style={{ marginBottom: '0.5rem' }}>
@@ -1419,7 +1457,7 @@ const [view, setView] = useState('library'); // library | diary | stats
                       )}
                       {log.tags && (
                         <div style={{ display: 'flex', gap: '4px', flexWrap: 'wrap' }}>
-                          {log.tags.split(',').map(t => t.trim()).filter(Boolean).map(t => (
+                          {shownTags(log.tags).map(t => (
                             <span key={t} style={{ background: 'var(--bg)', padding: '2px 6px', borderRadius: '4px', fontSize: '0.7rem', color: 'var(--text3)', border: '1px solid var(--border)' }}>{t}</span>
                           ))}
                         </div>

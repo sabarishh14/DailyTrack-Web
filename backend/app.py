@@ -147,6 +147,7 @@ from blueprints.media import media_bp
 from blueprints.chat import chat_bp
 from blueprints.routines import routines_bp
 from blueprints.funds import funds_bp
+from blueprints.vault import vault_bp
 
 app.register_blueprint(core_bp)
 app.register_blueprint(money_bp)
@@ -159,6 +160,7 @@ app.register_blueprint(media_bp)
 app.register_blueprint(chat_bp)
 app.register_blueprint(routines_bp)
 app.register_blueprint(funds_bp)
+app.register_blueprint(vault_bp)
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=5000, debug=True)

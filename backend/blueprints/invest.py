@@ -446,126 +446,73 @@ def get_equity():
         "invested_value": r.invested_value,
         "current_value": r.current_value
     } for r in records])
+class KiteError(Exception):
+    """Kite couldn't be read, with a message fit to show."""
+
+
+def kite_holdings(request_token):
+    """(funds, stocks) Kite holds now, as plain dicts: what a sync stores, or
+    (with the vault on) hands straight back to the device that locks them away."""
+    if not request_token:
+        raise KiteError("Request token is required for Kite API")
+    if not KITE_API_KEY or not KITE_API_SECRET:
+        raise KiteError("Kite API credentials not configured")
+    checksum = hashlib.sha256((KITE_API_KEY + request_token + KITE_API_SECRET).encode('utf-8')).hexdigest()
+    token_res = requests.post("https://api.kite.trade/session/token", data={
+        "api_key": KITE_API_KEY, "request_token": request_token, "checksum": checksum
+    }).json()
+    if token_res.get('status') != 'success':
+        raise KiteError("Kite Auth Failed. Token might be expired.")
+    headers = {"Authorization": f"token {KITE_API_KEY}:{token_res['data']['access_token']}"}
+
+    # Funds, at AMFI's latest NAV (named without plan and option, for a cleaner UI)
+    mf_holdings = requests.get("https://api.kite.trade/mf/holdings", headers=headers).json().get('data', [])
+    by_isin = {}
+    for scheme in funds_service.latest_navs().values():
+        for isin in scheme["isins"]:
+            by_isin[isin] = scheme
+    funds = []
+    for h in mf_holdings:
+        scheme = by_isin.get(h['tradingsymbol'])
+        if not scheme or not scheme['nav']:
+            continue
+        qty, avg_price, nav = float(h['quantity']), float(h['average_price']), scheme['nav']
+        funds.append({"symbol": scheme['name'], "isin": h['tradingsymbol'], "quantity": qty, "average_price": avg_price,
+                      "nav": nav, "invested_value": qty * avg_price, "current_value": qty * nav})
+
+    # Stocks, at Kite's last price
+    stocks = []
+    for e in requests.get("https://api.kite.trade/portfolio/holdings", headers=headers).json().get('data', []):
+        qty, avg_price, ltp = e['quantity'], e['average_price'], e['last_price']
+        stocks.append({"symbol": e['tradingsymbol'], "quantity": qty, "average_price": avg_price, "ltp": ltp,
+                       "invested_value": qty * avg_price, "current_value": qty * ltp,
+                       "token": e.get('instrument_token')})
+    return funds, stocks
+
+
 @invest_bp.route('/api/sync/kite', methods=['POST'])
 @require_access("invest")
 def sync_kite_direct():
     denied = owner_only()
     if denied: return denied
     print("🔄 Starting direct Kite sync...")
-    data = request.json
-    request_token = data.get('request_token')
-    
-    if not request_token:
-        return jsonify({"success": False, "message": "Request token is required for Kite API"})
-
-    if not KITE_API_KEY or not KITE_API_SECRET:
-        return jsonify({"success": False, "message": "Kite API credentials not configured"})
-
     try:
-        ist_timezone = pytz.timezone('Asia/Kolkata')
-        today_date = datetime.now(ist_timezone).date()
-        
-        # 1. Check if already synced today. (Today's snapshot may already exist
-        # from valuing funds held outside Kite, or repricing the last sync's
-        # holdings; the sync adds to it, or replaces them.)
+        today_date = datetime.now(pytz.timezone('Asia/Kolkata')).date()
+        # Already synced today? (Today's snapshot may already exist from valuing
+        # funds held outside Kite, or repricing the last sync's holdings; the
+        # sync adds to it, or replaces them.)
         if (EquityHolding.query.filter_by(date=today_date, repriced=False).first()
                 or MutualFundHolding.query.filter_by(date=today_date, repriced=False).first()):
             return jsonify({"success": False, "message": f"Already synced investments for {today_date.strftime('%d/%m/%Y')}!"})
 
-        # 2. Auth with Kite
-        raw = KITE_API_KEY + request_token + KITE_API_SECRET
-        checksum = hashlib.sha256(raw.encode('utf-8')).hexdigest()
-
-        token_res = requests.post("https://api.kite.trade/session/token", data={
-            "api_key": KITE_API_KEY, "request_token": request_token, "checksum": checksum
-        }).json()
-        
-        if token_res.get('status') != 'success':
-            return jsonify({"success": False, "message": "Kite Auth Failed. Token might be expired."})
-        
-        access_token = token_res['data']['access_token']
-        headers = {"Authorization": f"token {KITE_API_KEY}:{access_token}"}
-
-        # ==========================================
-        # 3. PROCESS MUTUAL FUNDS
-        # ==========================================
-        mf_res = requests.get("https://api.kite.trade/mf/holdings", headers=headers).json()
-        mf_holdings = mf_res.get('data', [])
-        
-        # Fetch latest NAVs from AMFI (official source for mfapi.in) to avoid downloading large Kite instruments CSV
-        amfi_res = requests.get("https://www.amfiindia.com/spages/NAVAll.txt", timeout=15)
-        mf_data_map = {}
-        for line in amfi_res.text.splitlines():
-            parts = line.split(';')
-            if len(parts) >= 8 and parts[0].strip().isdigit():
-                isin1, isin2 = parts[1].strip(), parts[2].strip()
-                raw_name = parts[3].strip()
-                
-                # Clean the AMFI name for a cleaner UI (remove plan/option details)
-                name = re.sub(r'(?i)\s*-\s*Direct.*', '', raw_name)
-                name = re.sub(r'(?i)\s*-\s*Regular.*', '', name)
-                name = re.sub(r'(?i)\s*-\s*Growth.*', '', name)
-                name = re.sub(r'(?i)\s*-\s*IDCW.*', '', name)
-                name = re.sub(r'(?i)\s*-\s*Dividend.*', '', name)
-                name = name.strip()
-                    
-                nav_str = parts[6].strip()
-                try:
-                    nav = float(nav_str)
-                    if isin1 and isin1 != '-': mf_data_map[isin1] = {'nav': nav, 'name': name}
-                    if isin2 and isin2 != '-': mf_data_map[isin2] = {'nav': nav, 'name': name}
-                except ValueError:
-                    continue
-        
-        mf_total_inv = 0.0
-        mf_total_curr = 0.0
-        mf_records = []
-
-        for h in mf_holdings:
-            raw_symbol = h['tradingsymbol']
-            qty, avg_price = float(h['quantity']), float(h['average_price'])
-            
-            fund_info = mf_data_map.get(raw_symbol)
-            if not fund_info or not fund_info['nav']: continue
-                
-            nav, real_name = fund_info['nav'], fund_info['name']
-            inv_val, curr_val = (qty * avg_price), (qty * nav)
-            
-            mf_total_inv += inv_val
-            mf_total_curr += curr_val
-            
-            mf_records.append(MutualFundHolding(
-                id=int(datetime.now().timestamp() * 1000) + len(mf_records),
-                date=today_date, symbol=real_name, isin=raw_symbol, quantity=qty, average_price=avg_price,
-                nav=nav, invested_value=inv_val, current_value=curr_val
-            ))
-
-        # ==========================================
-        # 4. PROCESS EQUITY (STOCKS)
-        # ==========================================
-        eq_res = requests.get("https://api.kite.trade/portfolio/holdings", headers=headers).json()
-        eq_holdings = eq_res.get('data', [])
-        
-        eq_total_inv = 0.0
-        eq_total_curr = 0.0
+        funds, stocks = kite_holdings((request.json or {}).get('request_token'))
+        base = int(datetime.now().timestamp() * 1000)
+        mf_records = [MutualFundHolding(id=base + i, date=today_date, **f) for i, f in enumerate(funds)]
         eq_records = []
+        for i, e in enumerate(stocks):
+            token = e.pop('token', None)
+            eq_records.append(EquityHolding(id=base + (token if token is not None else i), date=today_date, **e))
 
-        for e in eq_holdings:
-            qty, avg_price, ltp = e['quantity'], e['average_price'], e['last_price']
-            inv_val, curr_val = (qty * avg_price), (qty * ltp)
-            
-            eq_total_inv += inv_val
-            eq_total_curr += curr_val
-            
-            eq_records.append(EquityHolding(
-                id=int(datetime.now().timestamp() * 1000) + e.get('instrument_token', len(eq_records)),
-                date=today_date, symbol=e['tradingsymbol'], quantity=qty, average_price=avg_price,
-                ltp=ltp, invested_value=inv_val, current_value=curr_val
-            ))
-
-        # ==========================================
-        # 5. SAVE, THEN TODAY'S TOTALS
-        # ==========================================
         # Kite + funds held outside it + manual assets, worked out in one place
         # (funds_service.recompute_snapshot) so every path agrees.
         EquityHolding.query.filter_by(date=today_date, repriced=True).delete(synchronize_session=False)
@@ -575,9 +522,9 @@ def sync_kite_direct():
         db.session.flush()
         funds_service.recompute_snapshot(today_date)
         db.session.commit()
-
         return jsonify({"success": True, "message": f"Successfully synced Combined Portfolio!"})
-
+    except KiteError as e:
+        return jsonify({"success": False, "message": str(e)})
     except Exception as e:
         print(f"❌ Kite Sync Error: {str(e)}")
         import traceback

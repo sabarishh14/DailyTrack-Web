@@ -15,6 +15,11 @@ import zipfile
 from datetime import date
 
 MAX_BYTES = 20 * 1024 * 1024
+# Tags people give theatre watches on Letterboxd. A watch with one also gets the
+# app's own (overall-theatres, theatres-<year>), so it counts as a theatre trip.
+THEATRE_WORDS = {"theatre", "theater", "theatres", "theaters", "cinema", "cinemas", "big screen",
+                 "in theatre", "in theater", "in theatres", "in theaters", "in cinema", "in cinemas",
+                 "at the theatre", "at the theater", "at the cinema", "at the cinemas"}
 WANTED = ("diary.csv", "reviews.csv", "likes/films.csv", "watched.csv")
 
 
@@ -39,6 +44,15 @@ def _rating(value):
     except (TypeError, ValueError):
         return None
     return rating if 0 < rating <= 5 else None
+
+
+def _tags(raw, day):
+    """A watch's tags, plus the app's theatre ones when Letterboxd's say theatre."""
+    tags = [t.strip() for t in (raw or "").split(",") if t.strip()]
+    said = {" ".join(t.lower().replace("-", " ").replace("_", " ").split()) for t in tags}
+    if said & THEATRE_WORDS and not any(t.lower() == "overall-theatres" for t in tags):
+        tags += ["overall-theatres", f"theatres-{day.year}"]
+    return ",".join(tags) or None
 
 
 def _film(row):
@@ -96,14 +110,13 @@ def parse(data, filename=""):
         day = _day(row.get("Watched Date")) or _day(row.get("Date"))
         if not title or not day:
             continue
-        tags = ",".join(t.strip() for t in (row.get("Tags") or "").split(",") if t.strip())
         watches.append({
             "title": title, "year": year, "date": day,
             "rating": _rating(row.get("Rating")),
             "rewatch": (row.get("Rewatch") or "").strip().lower() == "yes",
             "liked": False,
             "review": (row.get("Review") or "").strip() or reviews.get((title, year, day)) or None,
-            "tags": tags or None,
+            "tags": _tags(row.get("Tags"), day),
         })
     watches.sort(key=lambda e: e["date"])
     # A like is for the film, not a watch: it goes on its latest one.

@@ -380,5 +380,50 @@ class RoutineCheckIn(db.Model):
     updated_at = db.Column(db.DateTime, default=datetime.utcnow)
 
 
+# ---- The private vault (blueprints/vault.py) ----
+# Investments locked with a key only their owner's devices hold. The server keeps
+# ciphertext it can't read; see the blueprint's docstring for how the keys fit.
+
+class VaultKey(db.Model):
+    """One person's vault keys, every secret in them wrapped on their devices."""
+    __tablename__ = "vault_keys"
+    email = db.Column(db.String(120), primary_key=True)
+    salt = db.Column(db.String(64), nullable=False)          # PBKDF2 salt for the passphrase
+    iterations = db.Column(db.Integer, nullable=False)
+    wrapped_key = db.Column(db.Text, nullable=False)          # the data key, under the passphrase
+    recovery_salt = db.Column(db.String(64), nullable=False)
+    recovery_wrapped_key = db.Column(db.Text, nullable=False)  # the data key, under the recovery key
+    public_key = db.Column(db.Text, nullable=False)           # for friends to be given the data key
+    wrapped_private_key = db.Column(db.Text, nullable=False)  # its private half, under the data key
+    # off: investments readable as before | moving: being locked in | on: locked in the vault
+    state = db.Column(db.String(8), nullable=False, default="off")
+    state_at = db.Column(db.DateTime, default=datetime.utcnow)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+class VaultItem(Owned, db.Model):
+    """A piece of the locked investments: ciphertext, and a revision so two
+    devices saving at once can't overwrite each other."""
+    __tablename__ = "vault_items"
+    __table_args__ = (db.PrimaryKeyConstraint("owner_email", "item_id"),)
+    item_id = db.Column(db.String(40), nullable=False)
+    payload = db.Column(db.Text, nullable=False)
+    rev = db.Column(db.Integer, nullable=False, default=1)
+    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+class VaultGrant(db.Model):
+    """owner_email's data key, wrapped for viewer_email's public key: a friend
+    Investments is shared with can open the vault, read-only."""
+    __tablename__ = "vault_grants"
+    owner_email = db.Column(db.String(120), primary_key=True)
+    viewer_email = db.Column(db.String(120), primary_key=True, index=True)
+    viewer_key = db.Column(db.Text, nullable=False)       # the public key it was wrapped for
+    ephemeral_key = db.Column(db.Text, nullable=False)
+    wrapped_key = db.Column(db.Text, nullable=False)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+
 # Every query on an Owned table is limited to the signed-in person (tenancy.py).
 install_owner_filter(Owned)

@@ -117,6 +117,10 @@ def set_share(viewer):
 
     row = db.session.get(Share, {"owner_email": me, "viewer_email": viewer})
     modules = _clean_modules((request.json or {}).get('modules')) if request.method == 'PUT' else []
+    if 'invest' not in modules:
+        # Their copy of the vault's key goes with Investments.
+        from blueprints.vault import drop_grant
+        drop_grant(me, viewer)
     if not modules:
         if row:
             db.session.delete(row)

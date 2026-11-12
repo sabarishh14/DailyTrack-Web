@@ -325,6 +325,12 @@ def require_access(module, level=None):
             needed = level or ("view" if request.method in ("GET", "HEAD") else "edit")
             if not g.access.can(module, needed):
                 return _forbidden(f"You need {needed} access to {module}")
+            if module == "invest":
+                # Locked in the private vault: only the vault's own routes reach it.
+                from blueprints.vault import locked_response
+                locked = locked_response()
+                if locked is not None:
+                    return locked
             return f(*args, **kwargs)
         return decorated_function
     return wrapper

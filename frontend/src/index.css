@@ -6408,6 +6408,69 @@ input[type="date"]::-webkit-calendar-picker-indicator {
   .table-row .snap-del:focus-visible { opacity: 1; }
 }
 
+/* ─── The log form's "Watched in a theatre" switch (SabDekho) ─── */
+.tv-theatre-switch {
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+  width: 100%;
+  padding: 0.65rem 0.85rem;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--bg2);
+  color: var(--text2);
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+  transition: border-color 0.15s, background 0.15s, color 0.15s;
+}
+
+.tv-theatre-switch.on {
+  border-color: rgba(229, 57, 53, 0.55);
+  background: rgba(229, 57, 53, 0.1);
+  color: var(--text);
+}
+
+.tv-theatre-knob {
+  margin-left: auto;
+  width: 34px;
+  height: 20px;
+  border-radius: 10px;
+  background: var(--border2);
+  position: relative;
+  transition: background 0.15s;
+}
+
+.tv-theatre-knob::after {
+  content: '';
+  position: absolute;
+  top: 3px;
+  left: 3px;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: #fff;
+  transition: transform 0.15s;
+}
+
+.tv-theatre-switch.on .tv-theatre-knob { background: #e53935; }
+.tv-theatre-switch.on .tv-theatre-knob::after { transform: translateX(14px); }
+
+/* A short how-to where the theatre stats would be (StatsView's TheatreHint). */
+.stats-theatre-hint {
+  display: flex;
+  align-items: center;
+  gap: 0.8rem;
+  padding: 0.85rem 1rem;
+  border: 1px dashed var(--border2);
+  border-radius: 12px;
+  color: var(--text2);
+  font-size: 0.85rem;
+  line-height: 1.45;
+}
+
+.stats-theatre-hint b { color: var(--text); }
+
 /* ─── Theatre trips by year: popcorn buckets (StatsView's TheatreYears) ─── */
 .popcorn-chart {
   display: flex;
@@ -10964,3 +11027,69 @@ button.acct-avg-row:hover { background: rgba(var(--accent-rgb), 0.08); }
 .donut-in { width: 100%; height: 100%; animation: donut-in 0.5s cubic-bezier(0.16, 1, 0.3, 1); }
 @keyframes donut-in { from { opacity: 0; transform: scale(0.92) rotate(-10deg); } to { opacity: 1; transform: none; } }
 @media (prefers-reduced-motion: reduce) { .donut-in { animation-duration: 0.01s; } }
+
+/* ── The private vault (components/Vault.jsx) ── */
+.vault-badge-wrap { position: relative; display: inline-flex; }
+.vault-badge {
+  border: 1px solid transparent; background: transparent; cursor: pointer; border-radius: 999px;
+  font-size: 0.72rem; font-weight: 700; color: var(--text3); padding: 0.1rem 0.35rem; line-height: 1.4;
+  opacity: 0.75; transition: opacity 0.2s, background 0.2s;
+}
+.vault-badge:hover { opacity: 1; }
+.vault-badge.on {
+  color: var(--pos); background: rgba(var(--accent-rgb), 0.08); border-color: rgba(52, 211, 153, 0.35);
+  padding: 0.1rem 0.55rem; opacity: 1; letter-spacing: 0.2px; text-transform: none;
+}
+.vault-tip {
+  position: absolute; top: calc(100% + 6px); left: 0; z-index: 30; width: min(280px, 78vw);
+  background: var(--card); border: 1px solid var(--border); border-radius: 12px; padding: 0.65rem 0.8rem;
+  font-size: 0.78rem; font-weight: 500; line-height: 1.45; color: var(--text2);
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.25); text-transform: none; letter-spacing: 0; white-space: normal;
+}
+.vault-gate {
+  position: absolute; inset: 0; z-index: 20; display: flex; justify-content: center; align-items: flex-start;
+  padding: 12vh 16px 0;
+}
+.vault-gate-card {
+  width: min(420px, 100%); background: var(--card); border: 1px solid var(--border); border-radius: 18px;
+  padding: 1.6rem 1.5rem; text-align: center; box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+}
+.vault-gate-icon { font-size: 2rem; margin-bottom: 0.4rem; }
+.vault-gate-card h3 { margin: 0 0 0.35rem; font-size: 1.1rem; color: var(--text); }
+.vault-gate-card p { margin: 0 0 1rem; font-size: 0.85rem; color: var(--text2); line-height: 1.5; }
+.vault-unlock { display: grid; grid-template-columns: 1fr auto; gap: 0.6rem; text-align: left; }
+.vault-unlock .st-input-wrap input { letter-spacing: 0.2px; }
+.vault-unlock-row { grid-column: 1 / -1; display: flex; justify-content: space-between; align-items: center; gap: 0.5rem; flex-wrap: wrap; }
+.vault-unlock .st-error { grid-column: 1 / -1; }
+.vault-unlock.compact { width: min(360px, 100%); }
+.st-row-action .vault-unlock .action-btn { padding: 0.5rem 1rem; }
+.vault-check { display: inline-flex; align-items: center; gap: 0.45rem; font-size: 0.8rem; color: var(--text2); cursor: pointer; }
+.vault-check input { accent-color: var(--accent); width: 15px; height: 15px; }
+.vault-link {
+  border: none; background: none; padding: 0; color: var(--accent); font: inherit; font-size: 0.78rem;
+  font-weight: 600; cursor: pointer; white-space: nowrap;
+}
+.vault-link:hover { text-decoration: underline; }
+.st-input-wrap .vault-link { padding: 0 0.75rem; }
+.vault-how-row { padding: 0.2rem 0 0.75rem 3.1rem; }
+.vault-how summary { cursor: pointer; font-size: 0.8rem; font-weight: 600; color: var(--accent); width: max-content; }
+.vault-how ul { margin: 0.55rem 0 0; padding-left: 1.1rem; display: grid; gap: 0.35rem; }
+.vault-how li { font-size: 0.8rem; color: var(--text2); line-height: 1.5; }
+.vault-modal { max-width: 480px; }
+.vault-recovery {
+  display: flex; align-items: center; justify-content: space-between; gap: 0.75rem; flex-wrap: wrap;
+  background: var(--card2); border: 1px dashed var(--border); border-radius: 12px; padding: 0.85rem 1rem;
+}
+.vault-recovery code { font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 0.95rem; font-weight: 700; color: var(--text); letter-spacing: 0.5px; word-break: break-all; }
+.vault-recovery-actions { display: flex; gap: 0.4rem; }
+.vault-recovery-actions .action-btn { padding: 0.45rem 0.85rem; font-size: 0.8rem; }
+.vault-progress { display: flex; align-items: center; gap: 0.6rem; font-size: 0.85rem; font-weight: 600; color: var(--text2); }
+.vault-spinner {
+  width: 14px; height: 14px; border-radius: 50%; border: 2px solid var(--border); border-top-color: var(--accent);
+  animation: vault-spin 0.8s linear infinite;
+}
+@keyframes vault-spin { to { transform: rotate(360deg); } }
+@media (max-width: 600px) {
+  .vault-how-row { padding-left: 0; }
+  .vault-unlock.compact { width: 100%; }
+}

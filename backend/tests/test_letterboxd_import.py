@@ -74,6 +74,14 @@ class ParseTest(unittest.TestCase):
         self.assertEqual((result["watches"], result["watched"]),
                          ([], [("Dune: Part Two", "2024"), ("Kaithi", "2019")]))
 
+    def test_letterboxd_theatre_tags_count_as_theatre_trips(self):
+        diary = ("Date,Name,Year,Letterboxd URI,Rating,Rewatch,Tags,Watched Date\n"
+                 "2026-05-02,Thug Life,2025,https://boxd.it/t,3,,\"IMAX, In Theaters\",2026-05-01\n"
+                 "2026-05-03,At Home,2024,https://boxd.it/h,3,,netflix,2026-05-02\n")
+        theatre, home = letterboxd_export.parse(diary.encode())["watches"]
+        self.assertEqual(theatre["tags"], "IMAX,In Theaters,overall-theatres,theatres-2026")
+        self.assertEqual(home["tags"], "netflix")
+
     def test_diary_csv_alone(self):
         result = letterboxd_export.parse(("﻿" + DIARY).encode(), "diary.csv")
         self.assertEqual(len(result["watches"]), 3)

@@ -183,6 +183,21 @@ export default function StatsView({ API, getToken, statsData, setStatsData, stat
 // MOVIE SECTIONS
 // ═══════════════════════════════════════════════════════════════════════
 
+/** Where the theatre stats go, while there are none yet: how to get them. */
+function TheatreHint() {
+  return (
+    <div className="stats-section">
+      <div className="stats-theatre-hint">
+        <span style={{ fontSize: '1.4rem' }} aria-hidden="true">🍿</span>
+        <span>
+          <b>Track your theatre trips.</b> Switch on <b>Watched in a theatre</b> when logging a film,
+          or add the ticket as a <b>Cinema</b> expense in Money.
+        </span>
+      </div>
+    </div>
+  );
+}
+
 // All time: theatre trips each year, as popcorn buckets filled to the count.
 export function TheatreYears({ visits }) {
   const byYear = {};
@@ -460,6 +475,7 @@ function MovieStatsSections({ d, statsYear, openModal, onFilterLibrary }) {
       )}
 
       {statsYear === 'all' && <TheatreYears visits={d.theatre_stats?.movies} />}
+      {!(d.theatre_stats?.total_visits > 0) && d.films_logged > 0 && <TheatreHint />}
 
       {/* ─── BY WEEK ─── */}
       <WeekChart

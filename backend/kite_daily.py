@@ -224,6 +224,11 @@ def _reprice(owner, priced_at, day, equity, funds, now):
         db.session.add_all(rows)
         db.session.flush()
         funds_service.recompute_snapshot(target)
+        # Later days standing on these holdings (today's, from valuing funds while
+        # the prices are still yesterday's close) take the new prices too.
+        for later in PortfolioSnapshot.query.filter(PortfolioSnapshot.date > target).all():
+            if funds_service.last_kite_day(later.date) == target:
+                funds_service.recompute_snapshot(later.date)
     settings.kite_priced_at = now
     if quoted:
         settings.kite_quoted_at = quoted

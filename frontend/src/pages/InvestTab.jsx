@@ -13,6 +13,7 @@ import AddManualAssetModal from '../components/AddManualAssetModal';
 import FundsModal from '../components/FundsModal';
 import EditManualAssetModal from '../components/EditManualAssetModal';
 import PinLockOverlay from './invest-components/PinLockOverlay';
+import { VaultBadge, VaultGate, useVault } from '../components/Vault';
 import { useAccess } from '../access/AccessContext';
 
 // ── A snapshot compared with another: each holding then, and what changed ──
@@ -83,6 +84,8 @@ function SnapshotDelete({ date, onDelete }) {
 function InvestTab({ investments, manualAssets, assetList, onAdd }) {
   const access = useAccess();
   const canEdit = access.can('invest', 'edit');
+  const vaultState = useVault();
+  const vaultClosed = vaultState.state === 'on' && !vaultState.open;
   const isOwner = access.isOwner;
 // 🚀 PIN LOCK STATES
   const [savedPin, setSavedPin] = useState(localStorage.getItem('dt_inv_pin'));
@@ -818,8 +821,11 @@ function InvestTab({ investments, manualAssets, assetList, onAdd }) {
   return (
     <div style={{ position: 'relative', minHeight: '80vh' }}>
 
+      {/* The private vault, locked on this device: its unlock comes first. */}
+      <VaultGate onUnlocked={() => onAdd?.()} />
+
       {/* 🚀 THE PIN LOCK OVERLAY (Now Perfectly Centered) */}
-      {!isUnlocked && (
+      {!isUnlocked && !vaultClosed && (
         <PinLockOverlay
           savedPin={savedPin}
           pinInput={pinInput}
@@ -836,11 +842,11 @@ function InvestTab({ investments, manualAssets, assetList, onAdd }) {
       {/* 🚀 BLUR WRAPPER AROUND EXISTING CONTENT */}
       <div className="invest-layout" style={{
         display: 'block',
-        filter: !isUnlocked ? 'blur(12px) grayscale(50%)' : 'none',
-        pointerEvents: !isUnlocked ? 'none' : 'auto',
-        userSelect: !isUnlocked ? 'none' : 'auto',
+        filter: !isUnlocked || vaultClosed ? 'blur(12px) grayscale(50%)' : 'none',
+        pointerEvents: !isUnlocked || vaultClosed ? 'none' : 'auto',
+        userSelect: !isUnlocked || vaultClosed ? 'none' : 'auto',
         transition: 'filter 0.4s cubic-bezier(0.4, 0, 0.2, 1)',
-        opacity: !isUnlocked ? 0.4 : 1
+        opacity: !isUnlocked || vaultClosed ? 0.4 : 1
       }}>
 
         {/* 🚀 NEW HERO SECTION: Metrics & Allocation */}
@@ -853,6 +859,7 @@ function InvestTab({ investments, manualAssets, assetList, onAdd }) {
                 <div style={{ minWidth: 0, flex: 1 }}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap' }}>
                     <span style={{ fontSize: '0.85rem', color: 'var(--text2)', textTransform: 'uppercase', fontWeight: 700, letterSpacing: '0.5px', whiteSpace: 'nowrap' }}>Combined Net Worth</span>
+                    <VaultBadge canChange={canEdit && !access.raw?.viewing} />
                     {hiddenCategories.length > 0 && (
                       <span className="filtered-badge">
                         ⚡ ({ASSET_CATEGORIES.length - hiddenCategories.length}/{ASSET_CATEGORIES.length})

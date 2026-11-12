@@ -20,6 +20,8 @@ import LoadingScreen from './components/LoadingScreen';
 import AccessControlModal from './components/AccessControlModal';
 import { AccessProvider, buildAccess, loadStoredAccess, storeAccess, canOpenTab, claimBrowserFor } from './access/AccessContext';
 import { getViewAs, setViewAs as storeViewAs, installViewAsFetch } from './access/viewAs';
+import { installVaultFetch } from './vault/intercept';
+import { reset as resetVault } from './vault/store';
 import GlobalSearchModal from './components/GlobalSearchModal';
 import EditTransactionModal from './components/EditTransactionModal';
 import FloatingChatWidget from './components/FloatingChatWidget';
@@ -28,6 +30,8 @@ import TopBar from './components/layout/TopBar';
 import MobileBottomNav from './components/layout/MobileBottomNav';
 
 installViewAsFetch(API);
+// With the private vault on, Investments is answered from it, on this device.
+installVaultFetch(API);
 
 // Turns a 401 into the message shown on the login screen.
 const revokedNotice = async (res) => {
@@ -245,6 +249,7 @@ const [categories, setCategories] = useState([]);
     storeAccess(null);
     storeViewAs(null);
     setViewAsState(null);
+    resetVault();
     setAccessRaw(null);
     setAuthNotice(typeof notice === 'string' ? notice : '');
     setIsLoggedIn(false);
