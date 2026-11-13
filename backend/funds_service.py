@@ -24,7 +24,7 @@ from sqlalchemy.exc import IntegrityError
 
 from extensions import db
 from models import (EquityHolding, Fund, FundSip, FundTransaction, FundValue, ManualAsset,
-                    MutualFundHolding, PortfolioSnapshot)
+                    MutualFundHolding, PortfolioSnapshot, StockValue)
 from tenancy import data_owner
 
 IST = pytz.timezone("Asia/Kolkata")
@@ -251,8 +251,19 @@ def process_sips(today):
 
 # ---- valuing, and the day's snapshot ----
 
+def last_fund_day(day):
+    """The latest day on or before `day` with values for funds held outside Kite:
+    they stand until the next, as Kite's last sync does."""
+    return (db.session.query(db.func.max(FundValue.date))
+            .filter(FundValue.owner_email == data_owner(), FundValue.date <= day).scalar())
+
+
 def value_funds(today):
-    """Today's worth of every fund held (folios merged), then today's snapshot."""
+    """Every fund held (folios merged) at its latest NAV, filed under the day
+    those NAVs are for: AMFI publishes a day's NAV that evening, so a look in the
+    morning brings yesterday's record (Friday's, over a weekend) up to date
+    rather than making today's. Then that day's snapshot, and any later ones
+    standing on it. Returns the day filed."""
     owner = data_owner()
     navs = latest_navs()
     held = {}
@@ -260,22 +271,40 @@ def value_funds(today):
         row = held.setdefault(f.amfi_code, {"name": f.name, "units": 0.0, "invested": 0.0})
         row["units"] += f.units or 0
         row["invested"] += float(f.invested or 0)
-    FundValue.query.filter(FundValue.owner_email == owner, FundValue.date == today).delete(synchronize_session=False)
-    for code, row in held.items():
+    priced = {}
+    for code in held:
         scheme = navs.get(code)
         if scheme:
-            nav, nav_date = scheme["nav"], scheme["date"]
+            priced[code] = (scheme["nav"], scheme["date"])
         else:   # merged or wound up: its last known NAV
             last = FundValue.query.filter_by(amfi_code=code).order_by(FundValue.date.desc()).first()
-            if last is None:
-                continue
-            nav, nav_date = last.nav, last.nav_date
+            if last is not None:
+                priced[code] = (last.nav, last.nav_date)
+    nav_day = min(max((d for _, d in priced.values()), default=today), today)
+    last = last_fund_day(today)
+    # A later day already filed holds what's held now: the NAVs bring it up to date.
+    day = max(nav_day, last) if last else nav_day
+    previous = {v.amfi_code: v for v in FundValue.query.filter_by(date=last).all()} if last else {}
+    FundValue.query.filter(FundValue.owner_email == owner, FundValue.date == day).delete(synchronize_session=False)
+    for code, row in held.items():
+        if code not in priced:
+            continue
+        nav, nav_date = priced[code]
         db.session.add(FundValue(
-            date=today, amfi_code=code, name=row["name"], units=round(row["units"], 3), nav=nav,
+            date=day, amfi_code=code, name=row["name"], units=round(row["units"], 3), nav=nav,
             nav_date=nav_date, invested=round(row["invested"], 2), value=round(row["units"] * nav, 2),
         ))
+    # Sold out since: a zero that day, so the days after don't carry it on.
+    for code, before in previous.items():
+        if before.units > 0 and code not in held:
+            db.session.add(FundValue(date=day, amfi_code=code, name=before.name, units=0.0, nav=before.nav,
+                                     nav_date=before.nav_date, invested=0.0, value=0.0))
     db.session.flush()
-    recompute_snapshot(today)
+    recompute_snapshot(day)
+    for later in PortfolioSnapshot.query.filter(PortfolioSnapshot.date > day).all():
+        if last_fund_day(later.date) == day:
+            recompute_snapshot(later.date)
+    return day
 
 
 def last_kite_day(day):
@@ -291,25 +320,34 @@ def last_kite_day(day):
     return max(days) if days else None
 
 
+def last_stock_day(day):
+    """The latest day on or before `day` with values for stocks added by hand."""
+    return (db.session.query(db.func.max(StockValue.date))
+            .filter(StockValue.owner_email == data_owner(), StockValue.date <= day).scalar())
+
+
 def recompute_snapshot(day):
-    """The day's totals: Kite's latest sync, funds held outside it, and manual assets."""
+    """The day's totals: Kite's latest sync, funds and stocks held outside it, and manual assets."""
     kite_day = last_kite_day(day)
     equity = EquityHolding.query.filter_by(date=kite_day).all() if kite_day else []
     kite_funds = MutualFundHolding.query.filter_by(date=kite_day).all() if kite_day else []
-    own_funds = FundValue.query.filter_by(date=day).all()
+    fund_day = last_fund_day(day)
+    own_funds = FundValue.query.filter_by(date=fund_day).all() if fund_day else []
+    stock_day = last_stock_day(day)
+    own_stocks = StockValue.query.filter_by(date=stock_day).all() if stock_day else []
     manual = ManualAsset.query.all()
 
     snap = PortfolioSnapshot.query.filter_by(date=day).first()
     # A day gets totals of its own only when something was valued that day: a
-    # Kite sync, or funds held outside it. Otherwise Kite's last day stands, so
-    # an import that adds nothing doesn't copy its totals onto today (and one
-    # made that way, or for funds since removed, goes).
-    if kite_day is not None and kite_day != day and not own_funds:
+    # Kite sync, or funds or stocks held outside it. Otherwise Kite's last day
+    # stands, so an import that adds nothing doesn't copy its totals onto today
+    # (and one made that way, or for funds since removed, goes).
+    if kite_day is not None and kite_day != day and fund_day != day and stock_day != day:
         if snap is not None and day == ist_today():
             db.session.delete(snap)
         return None
     if snap is None:
-        if not (equity or kite_funds or own_funds or manual):
+        if not (equity or kite_funds or own_funds or own_stocks or manual):
             return None
         snap = PortfolioSnapshot(id=int(time.time() * 1000), date=day)
         db.session.add(snap)
@@ -317,8 +355,8 @@ def recompute_snapshot(day):
     def manual_total(group, field):
         return sum(getattr(a, field) or 0 for a in manual if a.category in MANUAL_GROUPS[group])
 
-    snap.total_equity_inv = sum(e.invested_value for e in equity)
-    snap.total_equity_curr = sum(e.current_value for e in equity)
+    snap.total_equity_inv = sum(e.invested_value for e in equity) + sum(s.invested for s in own_stocks)
+    snap.total_equity_curr = sum(e.current_value for e in equity) + sum(s.value for s in own_stocks)
     snap.total_mf_inv = sum(m.invested_value for m in kite_funds) + sum(f.invested for f in own_funds)
     snap.total_mf_curr = sum(m.current_value for m in kite_funds) + sum(f.value for f in own_funds)
     snap.total_fixed_income_inv = manual_total("fixed", "invested_value")
@@ -335,6 +373,73 @@ def recompute_snapshot(day):
     return snap
 
 
+# ---- tidying records filed before values went under their NAV's day ----
+
+def _held_totals(snap, day):
+    """A record's stocks and funds from what was held on `day` (Kite's last sync,
+    funds and stocks added by hand); its manual assets as they were recorded."""
+    kite_day = last_kite_day(day)
+    equity = EquityHolding.query.filter_by(date=kite_day).all() if kite_day else []
+    kite_funds = MutualFundHolding.query.filter_by(date=kite_day).all() if kite_day else []
+    fund_day = last_fund_day(day)
+    own_funds = FundValue.query.filter_by(date=fund_day).all() if fund_day else []
+    stock_day = last_stock_day(day)
+    own_stocks = StockValue.query.filter_by(date=stock_day).all() if stock_day else []
+    snap.total_equity_inv = sum(e.invested_value for e in equity) + sum(s.invested for s in own_stocks)
+    snap.total_equity_curr = sum(e.current_value for e in equity) + sum(s.value for s in own_stocks)
+    snap.total_mf_inv = sum(m.invested_value for m in kite_funds) + sum(f.invested for f in own_funds)
+    snap.total_mf_curr = sum(m.current_value for m in kite_funds) + sum(f.value for f in own_funds)
+    snap.grand_total_inv = sum(getattr(snap, f) or 0 for f in (
+        "total_equity_inv", "total_mf_inv", "total_fixed_income_inv", "total_provident_inv", "total_gold_inv"))
+    snap.grand_total_curr = sum(getattr(snap, f) or 0 for f in (
+        "total_equity_curr", "total_mf_curr", "total_fixed_income_curr", "total_provident_curr", "total_gold_curr"))
+    snap.synced = False
+
+
+def tidy_fund_days():
+    """Funds held outside Kite were once filed under the day the app was opened,
+    not the day their NAV is for: opened on the 13th, the 12th's NAV went under
+    the 13th (and a weekend got records of its own). Each such day's values move
+    to their NAV's day (the latest wins there), that day's record takes their
+    totals, and the day they left keeps its record only if something else
+    happened on it (a Kite sync or repricing, or stocks added by hand). Manual
+    assets in past records are left as they were. Once done, nothing's found."""
+    owner = data_owner()
+    late = sorted(d for d, nav_day in (
+        db.session.query(FundValue.date, db.func.max(FundValue.nav_date))
+        .filter(FundValue.owner_email == owner, FundValue.units > 0)
+        .group_by(FundValue.date).all()) if nav_day is not None and nav_day < d)
+    for day in late:
+        moved = FundValue.query.filter_by(date=day).all()
+        target = max(v.nav_date for v in moved if v.units > 0)
+        FundValue.query.filter(FundValue.owner_email == owner, FundValue.date == target).delete(synchronize_session=False)
+        for v in moved:
+            v.date = target
+        db.session.flush()
+        busy = any(model.query.filter_by(date=day).first() for model in (EquityHolding, MutualFundHolding, StockValue))
+        left = PortfolioSnapshot.query.filter_by(date=day).first()
+        there = PortfolioSnapshot.query.filter_by(date=target).first()
+        if there is None and left is not None and not busy:
+            left.date = target          # the record itself moves to its NAV's day
+            there, left = left, None
+        elif there is None and left is not None:
+            there = PortfolioSnapshot(id=int(time.time() * 1000) + len(late), date=target, **{
+                f: getattr(left, f) for f in ("total_fixed_income_inv", "total_fixed_income_curr", "total_provident_inv",
+                                              "total_provident_curr", "total_gold_inv", "total_gold_curr")})
+            db.session.add(there)
+        if there is not None:
+            _held_totals(there, target)
+        if left is not None:
+            if busy:
+                _held_totals(left, day)
+            else:
+                db.session.delete(left)
+        db.session.flush()
+    if late:
+        db.session.commit()
+    return len(late)
+
+
 def refresh_if_due(fresh=False):
     """The first look each day (and after AMFI publishes a newer NAV) adds due SIP
     instalments and values the funds. Cheap when there's nothing to do; never
@@ -344,7 +449,8 @@ def refresh_if_due(fresh=False):
         return
     today = ist_today()
     due = FundSip.query.filter(FundSip.active.is_(True), FundSip.next_date <= today).first()
-    valued = FundValue.query.filter_by(date=today).all()
+    last = last_fund_day(today)
+    valued = FundValue.query.filter(FundValue.date == last, FundValue.units > 0).all() if last else []
     try:
         if fresh:
             latest_navs(FRESH_NAV_SECONDS)
@@ -395,6 +501,19 @@ def add_lumpsum(fund, amount, day):
     fund.units = round((fund.units or 0) + units, 3)
     fund.invested = float(fund.invested or 0) + amount
     return units
+
+
+def add_holding(fund, units, avg_nav, day):
+    """What's held already, as a fund app shows it: units at an average NAV.
+    What went in is exactly units x average NAV; no day's NAV is needed."""
+    amount = round(units * avg_nav, 2)
+    db.session.add(FundTransaction(
+        fund_id=fund.id, date=day, kind="HOLDING", amount=amount, units=units, nav=avg_nav,
+        source="manual", key=_key("holding", fund.id, day, units, avg_nav, time.time()),
+    ))
+    fund.units = round((fund.units or 0) + units, 3)
+    fund.invested = float(fund.invested or 0) + amount
+    return amount
 
 
 def start_sip(fund, amount, day, since):

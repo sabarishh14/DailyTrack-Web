@@ -15,6 +15,7 @@ const MASKABLE = typeof CSS !== 'undefined' && CSS.supports?.('-webkit-text-secu
 
 const auth = () => ({ 'Authorization': `Bearer ${getToken()}` });
 const today = () => new Date().toISOString().slice(0, 10);
+const yesterday = () => new Date(Date.now() - 86400000).toISOString().slice(0, 10);
 const ordinal = (n) => `${n}${(n % 100 >= 11 && n % 100 <= 13) ? 'th' : ['th', 'st', 'nd', 'rd'][n % 10] || 'th'}`;
 const units = (n) => Number(n).toLocaleString('en-IN', { maximumFractionDigits: 3 });
 const pct = (n) => `${n >= 0 ? '+' : ''}${n.toFixed(1)}%`;
@@ -76,9 +77,9 @@ function Switch({ on, onChange, label }) {
   );
 }
 
-function SipFields({ sip, onChange }) {
+function SipFields({ sip, onChange, noSince }) {
   return (
-    <div className="fd-grid sip">
+    <div className={`fd-grid sip ${noSince ? 'two' : ''}`}>
       <Field label="Every month">
         <input className="inp" inputMode="decimal" placeholder="₹ 5,000" value={sip.amount}
                onChange={e => onChange({ ...sip, amount: e.target.value })} />
@@ -88,9 +89,11 @@ function SipFields({ sip, onChange }) {
           {Array.from({ length: 31 }, (_, i) => i + 1).map(d => <option key={d} value={d}>{ordinal(d)}</option>)}
         </select>
       </Field>
-      <Field label="Since">
-        <input className="inp" type="date" max={today()} value={sip.since} onChange={e => onChange({ ...sip, since: e.target.value })} />
-      </Field>
+      {!noSince && (
+        <Field label="Since">
+          <input className="inp" type="date" max={today()} value={sip.since} onChange={e => onChange({ ...sip, since: e.target.value })} />
+        </Field>
+      )}
     </div>
   );
 }
@@ -211,8 +214,13 @@ function AddView({ onDone }) {
   const [query, setQuery] = useState('');
   const [results, setResults] = useState(null);
   const [fund, setFund] = useState(null);
+  // A fund held already is best added as the fund app shows it: units at an
+  // average NAV. An amount on a day is for a purchase made then.
+  const [mode, setMode] = useState('hold');   // hold | buy
+  const [units, setUnits] = useState('');
+  const [avgNav, setAvgNav] = useState('');
   const [amount, setAmount] = useState('');
-  const [date, setDate] = useState(today());
+  const [date, setDate] = useState(yesterday());
   const [withSip, setWithSip] = useState(false);
   const [sip, setSip] = useState({ amount: '', day: new Date().getDate(), since: today() });
   const [busy, setBusy] = useState(false);
@@ -231,14 +239,20 @@ function AddView({ onDone }) {
     return () => clearTimeout(timer);
   }, [query, fund]);
 
-  const ready = fund && (Number(amount) > 0 || (withSip && Number(sip.amount) > 0));
+  const holding = mode === 'hold' && Number(units) > 0 && Number(avgNav) > 0;
+  const buying = mode === 'buy' && Number(amount) > 0;
+  const ready = fund && (holding || buying || (withSip && Number(sip.amount) > 0));
+  // The day's NAV is out in the evening: by default, the latest one published.
+  const pick = (r) => { setFund(r); setDate(r.nav_date || yesterday()); };
   const submit = async () => {
     setBusy(true); setError('');
     try {
       const r = await send('POST', '/funds', {
         code: fund.code,
-        ...(Number(amount) > 0 ? { amount, date } : {}),
-        ...(withSip && Number(sip.amount) > 0 ? { sip } : {}),
+        ...(holding ? { units, avg_nav: avgNav } : {}),
+        ...(buying ? { amount, date } : {}),
+        // A holding already counts the past instalments: its SIP carries on from today.
+        ...(withSip && Number(sip.amount) > 0 ? { sip: mode === 'hold' ? { ...sip, since: today() } : sip } : {}),
       });
       onDone(`${r.added} added`, r.funds);
     } catch (e) { setError(e.message); }
@@ -257,7 +271,7 @@ function AddView({ onDone }) {
           <ul className="fd-results">
             {results.map(r => (
               <li key={r.code}>
-                <button onClick={() => setFund(r)}>
+                <button onClick={() => pick(r)}>
                   <span className="fd-result-name">{r.name}</span>
                   <span className="fd-muted">{r.amc ? `${r.amc} · ` : ''}NAV ₹{r.nav}</span>
                 </button>
@@ -283,23 +297,51 @@ function AddView({ onDone }) {
       </div>
 
       <div className="fd-box">
-        <span className="fd-box-title">One-time</span>
-        <div className="fd-grid">
-          <Field label="Amount">
-            <input className="inp" inputMode="decimal" placeholder="₹ 0" value={amount} onChange={e => setAmount(e.target.value)} />
-          </Field>
-          <Field label="On">
-            <input className="inp" type="date" max={today()} value={date} onChange={e => setDate(e.target.value)} />
-          </Field>
+        <div className="ac-seg fd-mode" role="radiogroup" aria-label="What to add">
+          {[['hold', 'I hold it'], ['buy', 'New purchase']].map(([id, label]) => (
+            <button key={id} type="button" role="radio" aria-checked={mode === id}
+                    className={`ac-seg-btn ${mode === id ? 'active' : ''}`} onClick={() => setMode(id)}>{label}</button>
+          ))}
         </div>
+        {mode === 'hold' ? (
+          <>
+            <div className="fd-grid">
+              <Field label="Units">
+                <input className="inp" inputMode="decimal" placeholder="0.000" value={units} onChange={e => setUnits(e.target.value)} />
+              </Field>
+              <Field label="Average NAV">
+                <input className="inp" inputMode="decimal" placeholder="₹ 0" value={avgNav} onChange={e => setAvgNav(e.target.value)} />
+              </Field>
+            </div>
+            <p className="fd-muted">
+              {holding
+                ? <>Invested {fmt(Math.round(units * avgNav))} · worth {fmt(Math.round(units * fund.nav))} today</>
+                : 'Both are in your fund app (Groww, Kuvera, Coin…) under this fund.'}
+            </p>
+          </>
+        ) : (
+          <>
+            <div className="fd-grid">
+              <Field label="Amount">
+                <input className="inp" inputMode="decimal" placeholder="₹ 0" value={amount} onChange={e => setAmount(e.target.value)} />
+              </Field>
+              <Field label="On">
+                <input className="inp" type="date" max={today()} value={date} onChange={e => setDate(e.target.value)} />
+              </Field>
+            </div>
+            <p className="fd-muted">Bought at that day’s NAV.</p>
+          </>
+        )}
       </div>
 
       <div className="fd-box">
         <Switch on={withSip} onChange={setWithSip} label="Monthly SIP" />
         {withSip && (
           <>
-            <SipFields sip={sip} onChange={setSip} />
-            <p className="fd-muted">Past instalments are filled in at each day’s NAV; new ones add themselves.</p>
+            <SipFields sip={sip} onChange={setSip} noSince={mode === 'hold'} />
+            <p className="fd-muted">
+              {mode === 'hold' ? 'Carries on from your next instalment.' : 'Past instalments are filled in at each day’s NAV; new ones add themselves.'}
+            </p>
           </>
         )}
       </div>
@@ -428,6 +470,9 @@ function FundsList({ funds, note, onDismissNote, onImport, onAdd, onChanged }) {
   const value = held.reduce((s, f) => s + (f.value || 0), 0);
   const invested = held.reduce((s, f) => s + (f.invested || 0), 0);
   const gain = invested > 0 ? ((value - invested) / invested) * 100 : null;
+  // The latest NAV the funds held are at: AMFI publishes a day's that evening.
+  const latestNav = held.map(f => f.nav_date).filter(Boolean).sort().pop();
+  const navDay = latestNav ? new Date(`${latestNav}T00:00:00`).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' }) : null;
 
   return (
     <div className="fd-list-view">
@@ -435,6 +480,7 @@ function FundsList({ funds, note, onDismissNote, onImport, onAdd, onChanged }) {
         <div className="fd-stat main">
           <span className="fd-stat-label">Current value</span>
           <span className="fd-summary-value">{fmt(Math.round(value))}</span>
+          {navDay && <span className="fd-muted sk-asof">NAV as of {navDay}</span>}
         </div>
         <div className="fd-stat">
           <span className="fd-stat-label">Invested</span>

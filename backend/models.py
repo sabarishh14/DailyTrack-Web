@@ -216,12 +216,51 @@ class FundValue(Owned, db.Model):
     nav_date = db.Column(db.Date, nullable=False)
     invested = db.Column(db.Float, nullable=False)
     value = db.Column(db.Float, nullable=False)
-class SyncLog(db.Model):
-    __tablename__ = "sync_log"
-    id = db.Column(BigId, primary_key=True)
-    last_sync = db.Column(db.DateTime, nullable=False)
+# ---- Stocks and ETFs added by hand (stocks_service.py) ----
+# Like funds held outside Kite: their own tables, meeting Kite's numbers only in
+# the day's PortfolioSnapshot and the holdings the Investments page reads.
 
-# ADD THIS NEW MODEL BELOW:
+class Stock(Owned, db.Model):
+    """One stock or ETF held, its totals worked out from its trades."""
+    __tablename__ = "stocks"
+    __table_args__ = (db.UniqueConstraint("owner_email", "symbol", name="uq_stock_owner_symbol"),)
+
+    id = db.Column(BigId, primary_key=True)
+    symbol = db.Column(db.String(40), nullable=False)    # NSE's, e.g. INFY or NIFTYBEES
+    name = db.Column(db.String(200), nullable=False)
+    isin = db.Column(db.String(12))
+    quantity = db.Column(db.Float, nullable=False, default=0.0)
+    invested = db.Column(Money, nullable=False, default=0)   # what's still held cost (average cost)
+    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+class StockTrade(Owned, db.Model):
+    """A buy or a sell, at the price paid or got."""
+    __tablename__ = "stock_trades"
+
+    id = db.Column(BigId, primary_key=True)
+    stock_id = db.Column(db.BigInteger, db.ForeignKey("stocks.id", ondelete="CASCADE"), nullable=False, index=True)
+    date = db.Column(db.Date, nullable=False)
+    kind = db.Column(db.String(4), nullable=False)       # BUY | SELL
+    quantity = db.Column(db.Float, nullable=False)
+    price = db.Column(db.Float, nullable=False)
+
+
+class StockValue(Owned, db.Model):
+    """What one stock was worth on one trading day."""
+    __tablename__ = "stock_values"
+    __table_args__ = (db.UniqueConstraint("owner_email", "date", "symbol", name="uq_stock_value_owner_date_symbol"),)
+
+    id = db.Column(BigId, primary_key=True)
+    date = db.Column(db.Date, nullable=False, index=True)
+    symbol = db.Column(db.String(40), nullable=False)
+    name = db.Column(db.String(200), nullable=False)
+    quantity = db.Column(db.Float, nullable=False)
+    price = db.Column(db.Float, nullable=False)
+    invested = db.Column(db.Float, nullable=False)
+    value = db.Column(db.Float, nullable=False)
+
+
 class AllowedEmail(db.Model):
     __tablename__ = "allowed_emails"
     email = db.Column(db.String(120), primary_key=True)
@@ -339,6 +378,8 @@ class UserSettings(db.Model):
     kite_priced_at = db.Column(db.DateTime)   # IST, the last time they were repriced
     kite_quoted_at = db.Column(db.DateTime)   # IST, when the latest stock price Yahoo gave traded
     kite_quotes_seen_at = db.Column(db.DateTime)   # IST, the last time Yahoo answered with stock prices
+    stocks_priced_at = db.Column(db.DateTime)      # IST, the last time stocks added by hand were priced
+    stocks_quoted_at = db.Column(db.DateTime)      # IST, when the latest of their prices traded
     updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 class DeviceToken(db.Model):
     """A phone that wants push alerts (low balance), per signed-in user."""

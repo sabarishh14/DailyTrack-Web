@@ -115,6 +115,8 @@ with app.app_context():
         db.session.execute(text("ALTER TABLE user_settings ADD COLUMN IF NOT EXISTS kite_priced_at TIMESTAMP"))
         db.session.execute(text("ALTER TABLE user_settings ADD COLUMN IF NOT EXISTS kite_quoted_at TIMESTAMP"))
         db.session.execute(text("ALTER TABLE user_settings ADD COLUMN IF NOT EXISTS kite_quotes_seen_at TIMESTAMP"))
+        db.session.execute(text("ALTER TABLE user_settings ADD COLUMN IF NOT EXISTS stocks_priced_at TIMESTAMP"))
+        db.session.execute(text("ALTER TABLE user_settings ADD COLUMN IF NOT EXISTS stocks_quoted_at TIMESTAMP"))
         # Running balances and account filters walk one person's account history in date order.
         db.session.execute(text("CREATE INDEX IF NOT EXISTS ix_transactions_owner_account_date_id ON transactions (owner_email, account, date, id)"))
         db.session.commit()
@@ -148,6 +150,7 @@ from blueprints.chat import chat_bp
 from blueprints.routines import routines_bp
 from blueprints.funds import funds_bp
 from blueprints.vault import vault_bp
+from blueprints.stocks import stocks_bp
 
 app.register_blueprint(core_bp)
 app.register_blueprint(money_bp)
@@ -161,6 +164,7 @@ app.register_blueprint(chat_bp)
 app.register_blueprint(routines_bp)
 app.register_blueprint(funds_bp)
 app.register_blueprint(vault_bp)
+app.register_blueprint(stocks_bp)
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=5000, debug=True)

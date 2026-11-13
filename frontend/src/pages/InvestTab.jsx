@@ -11,6 +11,7 @@ import MultiAssetSelect from '../components/MultiAssetSelect';
 import CustomSelect from '../components/CustomSelect';
 import AddManualAssetModal from '../components/AddManualAssetModal';
 import FundsModal from '../components/FundsModal';
+import StocksModal from '../components/StocksModal';
 import EditManualAssetModal from '../components/EditManualAssetModal';
 import PinLockOverlay from './invest-components/PinLockOverlay';
 import { VaultBadge, VaultGate, useVault } from '../components/Vault';
@@ -41,7 +42,8 @@ const clockTime = (d) => d.toLocaleTimeString('en-IN', { hour: 'numeric', minute
 const dayMonth = (d) => d.toLocaleDateString('en-IN', { day: 'numeric', month: 'short' });
 const sameDay = (a, b) => a.toDateString() === b.toDateString();
 
-/** "🕒 Stocks as of 3:29 pm": when the prices are from (Daily) or the last Kite sync (Manual). */
+/** "🕒 Stocks as of 3:29 pm · NAV 12 Nov": when the prices are from (Daily) or the last
+ *  Kite sync (Manual), and the day of the funds' NAV (AMFI publishes a day's that evening). */
 function PriceTime({ times }) {
   if (!times) return null;
   let text = null;
@@ -52,11 +54,14 @@ function PriceTime({ times }) {
   } else if (times.mode === 'manual' && times.synced) {
     text = `Kite synced ${dayMonth(new Date(`${times.synced}T00:00:00`))}`;
   }
+  const nav = times.funds_at ? dayMonth(new Date(`${times.funds_at}T00:00:00`)) : null;
+  if (nav) text = text ? `${text} · NAV ${nav}` : `NAV as of ${nav}`;
   if (!text) return null;
   return (
     <div
       title={times.stale ? "The market's open but the prices haven't moved: the price source isn't answering"
-        : times.closed_today ? "The market didn't open today (a holiday), so the last close stands" : undefined}
+        : times.closed_today ? "The market didn't open today (a holiday), so the last close stands"
+          : nav ? "Mutual funds are at the latest NAV published: AMFI publishes each day's that evening" : undefined}
       style={{ fontSize: '0.75rem', fontWeight: 600, marginTop: '0.3rem', color: times.stale ? '#d97706' : 'var(--text3)', whiteSpace: 'nowrap' }}
     >
       🕒 {text}{times.stale ? ' · not updating' : times.closed_today ? ' · market closed today' : ''}
@@ -85,7 +90,8 @@ function InvestTab({ investments, manualAssets, assetList, onAdd }) {
   const access = useAccess();
   const canEdit = access.can('invest', 'edit');
   const vaultState = useVault();
-  const vaultClosed = vaultState.state === 'on' && !vaultState.open;
+  // Locked: the unlock card. Opening with this device's key: no card, it's a moment.
+  const vaultClosed = vaultState.state === 'on' && !vaultState.open && vaultState.reason !== 'opening';
   const isOwner = access.isOwner;
 // 🚀 PIN LOCK STATES
   const [savedPin, setSavedPin] = useState(localStorage.getItem('dt_inv_pin'));
@@ -105,6 +111,7 @@ function InvestTab({ investments, manualAssets, assetList, onAdd }) {
       if (e.key === 'Escape') {
         setIsAddModalOpen(false);
         setIsFundsOpen(false);
+        setIsStocksOpen(false);
         setEditingAsset(null);
         setDrillDownDate(null);
         setShowAssetSettings(false);
@@ -261,6 +268,7 @@ function InvestTab({ investments, manualAssets, assetList, onAdd }) {
   const [expandedSection, setExpandedSection] = useState('MARKET');
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
   const [isFundsOpen, setIsFundsOpen] = useState(false);
+  const [isStocksOpen, setIsStocksOpen] = useState(false);
   const [showBalances, setShowBalances] = useState(false);
   const [invCurrentPage, setInvCurrentPage] = useState(0);
   const [invRowsPerPage, setInvRowsPerPage] = useState(5);
@@ -1023,6 +1031,9 @@ function InvestTab({ investments, manualAssets, assetList, onAdd }) {
                   <button className="action-btn" style={{ flex: 1, minWidth: '120px', justifyContent: 'center', background: 'var(--bg3)', border: '1px solid var(--border)', color: 'var(--text)', boxShadow: 'none' }} onClick={() => setIsFundsOpen(true)}>
                     📄 Mutual funds
                   </button>
+                  <button className="action-btn" style={{ flex: 1, minWidth: '120px', justifyContent: 'center', background: 'var(--bg3)', border: '1px solid var(--border)', color: 'var(--text)', boxShadow: 'none' }} onClick={() => setIsStocksOpen(true)}>
+                    📈 Stocks
+                  </button>
                   {isOwner && (
                   <>
                   <button className="action-btn" style={{ flex: 1, minWidth: '120px', justifyContent: 'center', background: 'linear-gradient(135deg, #14b8a6 0%, #0d9488 100%)', boxShadow: '0 4px 15px rgba(20, 184, 166, 0.2)' }} onClick={handleSyncToSheets} disabled={syncingSheets}>
@@ -1756,6 +1767,7 @@ function InvestTab({ investments, manualAssets, assetList, onAdd }) {
         {/* Render the Add Modal if state is true */}
         {isAddModalOpen && <AddManualAssetModal onClose={() => setIsAddModalOpen(false)} onAdd={onAdd} />}
         {isFundsOpen && <FundsModal onClose={() => setIsFundsOpen(false)} onChanged={onAdd} />}
+        {isStocksOpen && <StocksModal onClose={() => setIsStocksOpen(false)} onChanged={onAdd} />}
         {editingAsset && <EditManualAssetModal asset={editingAsset} onClose={() => setEditingAsset(null)} onRefresh={onAdd} />}
 
         {/* Drill-down Modal (Shared for MF & Equity) */}

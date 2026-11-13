@@ -22,7 +22,7 @@ import requests
 import funds_service
 from extensions import db
 from funds_service import IST, NavUnavailable
-from models import EquityHolding, FundValue, MutualFundHolding, PortfolioSnapshot, UserSettings
+from models import EquityHolding, FundValue, MutualFundHolding, PortfolioSnapshot, Stock, UserSettings
 from tenancy import data_owner
 
 MODES = ("manual", "daily")
@@ -280,6 +280,21 @@ def _closed_today(quoted, seen, now):
                 and seen.time() >= SESSION_UNDERWAY)
 
 
+def _funds_nav_day(kite_day, mode, today):
+    """The day of the latest NAV the funds held are valued at: AMFI publishes a
+    day's NAVs that evening, so in the morning it's yesterday's. Funds held
+    outside Kite say it themselves; Kite's (on Daily) from AMFI's file, if it's
+    already been read (this never fetches it)."""
+    days = []
+    fund_day = funds_service.last_fund_day(today)
+    if fund_day:
+        days += [v.nav_date for v in FundValue.query.filter(FundValue.date == fund_day, FundValue.units > 0).all()]
+    if kite_day and mode == "daily":
+        by_isin = funds_service._navs.get("by_isin") or {}
+        days += [by_isin[f.isin]["date"] for f in MutualFundHolding.query.filter_by(date=kite_day).all() if f.isin in by_isin]
+    return max(days).isoformat() if days else None
+
+
 def price_times(now=None):
     """What the Investments page says about prices: on Daily, when the stocks'
     prices are from (stale when the market's open and they're well behind, as
@@ -297,7 +312,19 @@ def price_times(now=None):
     closed = mode == "daily" and _closed_today(quoted, settings.kite_quotes_seen_at if settings else None, now)
     day = funds_service.last_kite_day(now.date())
     held = day is not None and EquityHolding.query.filter_by(date=day).first() is not None
+    funds_at = _funds_nav_day(day, mode, now.date())
+    own = settings.stocks_quoted_at if settings else None
+    if synced is None and own is not None and Stock.query.filter(Stock.quantity > 0).first():
+        # No Kite, stocks added by hand: when their prices are from.
+        closed = _closed_today(own, settings.stocks_priced_at, now)
+        return {
+            "mode": "daily", "synced": None, "stocks_at": own.isoformat(),
+            "checked_at": settings.stocks_priced_at.isoformat() if settings.stocks_priced_at else None,
+            "stale": bool(_market_open(now) and not closed and now - own > STALE_AFTER),
+            "closed_today": bool(closed), "funds_at": funds_at,
+        }
     return {
+        "funds_at": funds_at,
         "mode": mode,
         "synced": synced.isoformat() if synced else None,
         "stocks_at": quoted.isoformat() if quoted and mode == "daily" else None,

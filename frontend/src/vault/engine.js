@@ -205,30 +205,48 @@ function setManualTotals(snap, manual) {
   snap.synced = false;
 }
 
-/** funds_service.recompute_snapshot: the day's totals from Kite's latest sync, funds, and manual assets. */
+/** The latest day on or before `day` with values for stocks added by hand. */
+function lastStockDay(t, day) {
+  let best = null;
+  for (const v of t.stock_values) if (v.date <= day && (best === null || v.date > best)) best = v.date;
+  return best;
+}
+
+/** funds_service.recompute_snapshot: the day's totals from Kite's latest sync, funds and stocks held outside it, and manual assets. */
 function recomputeSnapshot(t, day) {
   const kiteDay = lastKiteDay(t, day);
   const equity = kiteDay ? t.equity.filter(e => e.date === kiteDay) : [];
   const kiteFunds = kiteDay ? t.mf.filter(m => m.date === kiteDay) : [];
-  const own = t.fund_values.filter(f => f.date === day);
+  const fundDay = lastFundDay(t, day);
+  const own = fundDay ? t.fund_values.filter(f => f.date === fundDay) : [];
+  const stockDay = lastStockDay(t, day);
+  const ownStocks = stockDay ? t.stock_values.filter(v => v.date === stockDay) : [];
   let snap = t.snapshots.find(s => s.date === day);
-  if (kiteDay !== null && kiteDay !== day && !own.length) {
+  if (kiteDay !== null && kiteDay !== day && fundDay !== day && stockDay !== day) {
     if (snap && day === istToday()) t.snapshots = t.snapshots.filter(s => s !== snap);
     return null;
   }
   if (!snap) {
-    if (!(equity.length || kiteFunds.length || own.length || t.assets.length)) return null;
+    if (!(equity.length || kiteFunds.length || own.length || ownStocks.length || t.assets.length)) return null;
     snap = newSnapshot(day);
     t.snapshots.push(snap);
   }
-  snap.total_equity_inv = sum(equity, e => e.invested_value);
-  snap.total_equity_curr = sum(equity, e => e.current_value);
+  snap.total_equity_inv = sum(equity, e => e.invested_value) + sum(ownStocks, s => s.invested);
+  snap.total_equity_curr = sum(equity, e => e.current_value) + sum(ownStocks, s => s.value);
   snap.total_mf_inv = sum(kiteFunds, m => m.invested_value) + sum(own, f => f.invested);
   snap.total_mf_curr = sum(kiteFunds, m => m.current_value) + sum(own, f => f.value);
   setManualTotals(snap, t.assets);
   return snap;
 }
 
+/** The latest day on or before `day` with values for funds held outside Kite: they stand until the next. */
+function lastFundDay(t, day) {
+  let best = null;
+  for (const v of t.fund_values) if (v.date <= day && (best === null || v.date > best)) best = v.date;
+  return best;
+}
+
+/** funds_service.value_funds: every fund held at its latest NAV, filed under the day those NAVs are for. */
 async function valueFunds(t, today) {
   const { byCode } = await navs();
   const held = new Map();
@@ -238,30 +256,116 @@ async function valueFunds(t, today) {
     row.invested += Number(f.invested || 0);
     held.set(f.amfi_code, row);
   }
-  t.fund_values = t.fund_values.filter(v => v.date !== today);
-  for (const [code, row] of held) {
-    let nav, navDate;
+  const priced = new Map();
+  for (const code of held.keys()) {
     const scheme = byCode[code];
-    if (scheme) {
-      nav = scheme.nav; navDate = scheme.date;
-    } else {   // merged or wound up: its last known NAV
+    if (scheme) priced.set(code, [scheme.nav, scheme.date]);
+    else {   // merged or wound up: its last known NAV
       const last = t.fund_values.filter(v => v.amfi_code === code).sort((a, b) => (a.date < b.date ? 1 : -1))[0];
-      if (!last) continue;
-      nav = last.nav; navDate = last.nav_date;
+      if (last) priced.set(code, [last.nav, last.nav_date]);
     }
+  }
+  const navDays = [...priced.values()].map(p => p[1]).sort();
+  const navDay = minDay(navDays.length ? navDays[navDays.length - 1] : today, today);
+  const last = lastFundDay(t, today);
+  // A later day already filed holds what's held now: the NAVs bring it up to date.
+  const day = last ? (navDay > last ? navDay : last) : navDay;
+  const previous = new Map(last ? t.fund_values.filter(v => v.date === last).map(v => [v.amfi_code, v]) : []);
+  t.fund_values = t.fund_values.filter(v => v.date !== day);
+  for (const [code, row] of held) {
+    if (!priced.has(code)) continue;
+    const [nav, navDate] = priced.get(code);
     t.fund_values.push({
-      id: newId(), date: today, amfi_code: code, name: row.name, units: r3(row.units), nav,
+      id: newId(), date: day, amfi_code: code, name: row.name, units: r3(row.units), nav,
       nav_date: navDate, invested: r2(row.invested), value: r2(row.units * nav),
     });
   }
-  recomputeSnapshot(t, today);
+  // Sold out since: a zero that day, so the days after don't carry it on.
+  for (const [code, before] of previous) {
+    if (before.units > 0 && !held.has(code)) {
+      t.fund_values.push({ id: newId(), date: day, amfi_code: code, name: before.name, units: 0, nav: before.nav,
+        nav_date: before.nav_date, invested: 0, value: 0 });
+    }
+  }
+  recomputeSnapshot(t, day);
+  for (const later of t.snapshots.filter(s => s.date > day).map(s => s.date)) {
+    if (lastFundDay(t, later) === day) recomputeSnapshot(t, later);
+  }
+  return day;
+}
+
+// ---- tidying records filed before values went under their NAV's day ----
+
+/** A record's stocks and funds from what was held on `day`; its manual assets as recorded (funds_service._held_totals). */
+function heldTotals(t, snap, day) {
+  const kiteDay = lastKiteDay(t, day), fundDay = lastFundDay(t, day), stockDay = lastStockDay(t, day);
+  const equity = kiteDay ? t.equity.filter(e => e.date === kiteDay) : [];
+  const kiteFunds = kiteDay ? t.mf.filter(m => m.date === kiteDay) : [];
+  const own = fundDay ? t.fund_values.filter(v => v.date === fundDay) : [];
+  const stocks = stockDay ? t.stock_values.filter(v => v.date === stockDay) : [];
+  snap.total_equity_inv = sum(equity, e => e.invested_value) + sum(stocks, s => s.invested);
+  snap.total_equity_curr = sum(equity, e => e.current_value) + sum(stocks, s => s.value);
+  snap.total_mf_inv = sum(kiteFunds, m => m.invested_value) + sum(own, f => f.invested);
+  snap.total_mf_curr = sum(kiteFunds, m => m.current_value) + sum(own, f => f.value);
+  snap.grand_total_inv = ['total_equity_inv', 'total_mf_inv', 'total_fixed_income_inv', 'total_provident_inv', 'total_gold_inv']
+    .reduce((s, f) => s + (snap[f] || 0), 0);
+  snap.grand_total_curr = ['total_equity_curr', 'total_mf_curr', 'total_fixed_income_curr', 'total_provident_curr', 'total_gold_curr']
+    .reduce((s, f) => s + (snap[f] || 0), 0);
+  snap.synced = false;
+}
+
+/** funds_service.tidy_fund_days: each day's fund values once filed under the day the app was opened go to their NAV's day. */
+function tidyFundDays(t) {
+  const navDayOf = new Map();
+  for (const v of t.fund_values) if (v.units > 0 && v.nav_date && (!navDayOf.has(v.date) || v.nav_date > navDayOf.get(v.date))) navDayOf.set(v.date, v.nav_date);
+  const late = [...navDayOf].filter(([d, n]) => n < d).map(([d]) => d).sort();
+  for (const day of late) {
+    const moved = t.fund_values.filter(v => v.date === day);
+    const target = moved.filter(v => v.units > 0).map(v => v.nav_date).sort().pop();
+    t.fund_values = t.fund_values.filter(v => v.date !== target);
+    for (const v of moved) v.date = target;
+    const busy = t.equity.some(e => e.date === day) || t.mf.some(m => m.date === day) || t.stock_values.some(s => s.date === day);
+    let left = t.snapshots.find(s => s.date === day);
+    let there = t.snapshots.find(s => s.date === target);
+    if (!there && left && !busy) {
+      left.date = target;          // the record itself moves to its NAV's day
+      there = left;
+      left = null;
+    } else if (!there && left) {
+      there = newSnapshot(target);
+      for (const f of ['total_fixed_income_inv', 'total_fixed_income_curr', 'total_provident_inv', 'total_provident_curr', 'total_gold_inv', 'total_gold_curr']) there[f] = left[f];
+      t.snapshots.push(there);
+    }
+    if (there) heldTotals(t, there, target);
+    if (left) {
+      if (busy) heldTotals(t, left, day);
+      else t.snapshots = t.snapshots.filter(s => s !== left);
+    }
+  }
+  return late.length;
+}
+
+/** Funds held outside Kite as they stood on `day`: their last values on or before it, held ones. */
+function ownFunds(t, day) {
+  const d = lastFundDay(t, day);
+  return d ? t.fund_values.filter(v => v.date === d && v.units > 0) : [];
+}
+
+/** The day of the latest NAV the funds held are valued at (kite_daily._funds_nav_day). */
+function fundsNavDay(t, kiteDay, daily, today) {
+  const days = ownFunds(t, today).map(v => v.nav_date);
+  if (kiteDay && daily && navCache) {
+    for (const f of t.mf.filter(m => m.date === kiteDay)) if (f.isin && navCache.byIsin[f.isin]) days.push(navCache.byIsin[f.isin].date);
+  }
+  return days.length ? days.sort()[days.length - 1] : null;
 }
 
 async function refreshFunds(t, fresh) {
   if (!(t.funds.some(f => (f.units || 0) > 0) || t.sips.some(s => s.active))) return false;
   const today = istToday();
   const due = t.sips.some(s => s.active && s.next_date <= today);
-  const valued = t.fund_values.filter(v => v.date === today);
+  const lastDay = lastFundDay(t, today);
+  const valued = lastDay ? t.fund_values.filter(v => v.date === lastDay && v.units > 0) : [];
   const { byCode } = await navs(fresh);
   if (valued.length && !due && !valued.some(v => (byCode[v.amfi_code]?.date ?? v.nav_date) > v.nav_date)) return false;
   await processSips(t, today);
@@ -390,13 +494,147 @@ async function priceTimes(t) {
   const closed = daily && closedToday(quoted, t.state.quotes_seen_at, now);
   const day = lastKiteDay(t, now.slice(0, 10));
   const held = day !== null && t.equity.some(e => e.date === day);
+  const fundsAt = fundsNavDay(t, day, daily, now.slice(0, 10));
+  const own = t.state.stocks_quoted_at;
+  if (synced === null && own && t.stocks.some(s => s.quantity > 0)) {
+    // No Kite, stocks added by hand: when their prices are from.
+    const shut = closedToday(own, t.state.stocks_priced_at, now);
+    return {
+      mode: 'daily', synced: null, stocks_at: own, checked_at: t.state.stocks_priced_at || null,
+      stale: Boolean(marketOpen(now) && !shut && ms(now) - ms(own) > STALE_MS), closed_today: Boolean(shut),
+      funds_at: fundsAt,
+    };
+  }
   return {
+    funds_at: fundsAt,
     mode, synced,
     stocks_at: quoted && daily ? quoted : null,
     checked_at: daily && t.state.priced_at ? t.state.priced_at : null,
     stale: Boolean(daily && held && marketOpen(now) && !closed && (!quoted || ms(now) - ms(quoted) > STALE_MS)),
     closed_today: Boolean(held && closed),
   };
+}
+
+// ---- stocks and ETFs added by hand (stocks_service.py) ----
+
+let stockList = null;   // { at, rows: [{symbol, name, isin}] }
+
+async function listedStocks() {
+  if (stockList && Date.now() - stockList.at < 60 * 60 * 1000) return stockList.rows;
+  try {
+    const { stocks } = await vaultCall('GET', '/vault/stock-list');
+    stockList = { at: Date.now(), rows: stocks.map(([symbol, name, isin]) => ({ symbol, name, isin })) };
+    return stockList.rows;
+  } catch (e) {
+    if (stockList) return stockList.rows;
+    throw new Refused(e.message || 'Couldn’t reach NSE’s list of stocks', 503);
+  }
+}
+
+const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+const longDay = (d) => `${d.slice(8, 10)} ${MONTHS[+d.slice(5, 7) - 1]} ${d.slice(0, 4)}`;
+
+/** Quantity and invested (average cost) from the trades, oldest first; a sale of more than was held then can't be. */
+function replayStock(stock, trades) {
+  let quantity = 0, invested = 0;
+  const sorted = [...trades].sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : a.id - b.id));
+  for (const x of sorted) {
+    if (x.kind === 'BUY') {
+      quantity += x.quantity;
+      invested += x.quantity * x.price;
+    } else {
+      if (x.quantity > quantity + 1e-9) throw new Refused(`You held ${Number(quantity.toPrecision(6))} ${stock.symbol} on ${longDay(x.date)}`);
+      invested -= quantity ? invested / quantity * x.quantity : 0;
+      quantity -= x.quantity;
+      if (quantity <= 1e-9) { quantity = 0; invested = 0; }
+    }
+  }
+  stock.quantity = Math.round(quantity * 1e6) / 1e6;
+  stock.invested = r2(invested);
+}
+
+function stockTrade(t, stock, kind, quantity, price, day) {
+  if (kind !== 'BUY' && kind !== 'SELL') throw new Refused('Buy or sell?');
+  if (!(quantity > 0 && quantity <= 10_000_000)) throw new Refused('Enter how many');
+  if (!(price > 0 && price <= 10_000_000)) throw new Refused('Enter the price');
+  if (day > istToday()) throw new Refused('That date is in the future');
+  t.stock_trades.push({ id: newId(), stock_id: stock.id, date: day, kind, quantity, price });
+  replayStock(stock, t.stock_trades.filter(x => x.stock_id === stock.id));
+}
+
+/** Prices what's held and files it under the day the prices are from (or `on`, a day holdings changed). */
+async function valueStocks(t, on = null) {
+  const now = istNow(), today = now.slice(0, 10);
+  const held = t.stocks.filter(s => s.quantity > 0);
+  let prices = {}, quoted = null;
+  if (held.length) {
+    const symbols = [...new Set(held.map(s => s.symbol))].sort();
+    const r = await vaultCall('GET', `/vault/quotes?symbols=${encodeURIComponent(symbols.join(','))}`).catch(() => null);
+    if (r) { prices = r.prices || {}; quoted = r.at; }
+  }
+  if (held.length && !Object.keys(prices).length && on === null) return false;
+  const last = lastStockDay(t, today);
+  const quoteDay = minDay(quoted ? quoted.slice(0, 10) : today, today);
+  // A later day already filed holds what's held now: the prices bring it up to date.
+  const target = on || (last ? (quoteDay > last ? quoteDay : last) : quoteDay);
+  const previous = new Map(last ? t.stock_values.filter(v => v.date === last).map(v => [v.symbol, v]) : []);
+  t.stock_values = t.stock_values.filter(v => v.date !== target);
+  for (const s of held) {
+    const price = prices[s.symbol] || previous.get(s.symbol)?.price || Number(s.invested) / s.quantity;
+    t.stock_values.push({ id: newId(), date: target, symbol: s.symbol, name: s.name, quantity: s.quantity, price,
+      invested: Number(s.invested), value: r2(s.quantity * price) });
+  }
+  // Sold out since: a zero that day, so the day after doesn't carry it on.
+  const heldNow = new Set(held.map(s => s.symbol));
+  for (const [symbol, before] of previous) {
+    if (before.quantity > 0 && !heldNow.has(symbol)) {
+      t.stock_values.push({ id: newId(), date: target, symbol, name: before.name, quantity: 0, price: before.price, invested: 0, value: 0 });
+    }
+  }
+  recomputeSnapshot(t, target);
+  for (const later of t.snapshots.filter(s => s.date > target).map(s => s.date)) {
+    if (lastStockDay(t, later) === target) recomputeSnapshot(t, later);
+  }
+  if (Object.keys(prices).length) t.state.stocks_priced_at = now;
+  if (quoted) t.state.stocks_quoted_at = quoted.slice(0, 19);
+  return true;
+}
+
+async function refreshStocks(t, fresh) {
+  if (!t.stocks.some(s => s.quantity > 0)) return false;
+  const now = istNow(), pricedAt = t.state.stocks_priced_at;
+  const asked = fresh && (!pricedAt || ms(now) - ms(pricedAt) >= FRESH_AFTER_MS);
+  if (!asked && !isStale(pricedAt, now)) return false;
+  return valueStocks(t);
+}
+
+function stocksOverview(t) {
+  // Each one's latest price, even when its latest day was since deleted.
+  const values = new Map();
+  for (const v of [...t.stock_values].filter(v => v.date <= istToday()).sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0))) values.set(v.symbol, v);
+  const trades = new Map();
+  for (const x of [...t.stock_trades].sort((a, b) => (a.date < b.date ? 1 : a.date > b.date ? -1 : b.id - a.id))) {
+    trades.set(x.stock_id, [...(trades.get(x.stock_id) || []), { id: x.id, date: x.date, kind: x.kind, quantity: x.quantity, price: x.price }]);
+  }
+  const out = [...t.stocks].sort((a, b) => (a.symbol < b.symbol ? -1 : a.symbol > b.symbol ? 1 : 0)).map(s => {
+    const price = values.get(s.symbol)?.price ?? null;
+    return {
+      symbol: s.symbol, name: s.name, quantity: s.quantity, invested: r2(Number(s.invested)),
+      avg_price: s.quantity ? r2(Number(s.invested) / s.quantity) : null,
+      price, value: price !== null ? r2(s.quantity * price) : null, trades: trades.get(s.id) || [],
+    };
+  });
+  out.sort((a, b) => ((a.quantity <= 0) - (b.quantity <= 0)) || ((b.value || 0) - (a.value || 0)));
+  return out;
+}
+
+/** Stocks added by hand as they stood on `day`, held ones (invest._own_stocks). */
+function ownStocks(t, day) {
+  const d = lastStockDay(t, day);
+  return (d ? t.stock_values.filter(v => v.date === d && v.quantity > 0) : []).map(s => ({
+    symbol: s.symbol, quantity: s.quantity, average_price: s.quantity ? Math.round(s.invested / s.quantity * 10000) / 10000 : 0,
+    ltp: s.price, invested_value: s.invested, current_value: s.value, ret_pct: retPct(s.value, s.invested),
+  }));
 }
 
 // ---- manual assets, RDs and automations (invest.py) ----
@@ -640,8 +878,10 @@ export async function handle(vault, method, path, query, body, readOnly) {
     if (method === 'GET' && path === '/investments') {
       if (!readOnly) {
         const fresh = query.get('refresh') === '1';
+        await write(t => tidyFundDays(t)).catch(() => {});
         await write(t => repriceIfDue(t, fresh)).catch(() => {});
         await write(t => refreshFunds(t, fresh)).catch(() => {});
+        await write(t => refreshStocks(t, fresh)).catch(() => {});
         await write(t => { if (refreshRDs(t, today)) updateLatestSnapshot(t); }).catch(() => {});
       }
       const rows = [...read().snapshots].sort((a, b) => (a.date < b.date ? 1 : a.date > b.date ? -1 : 0));
@@ -664,7 +904,12 @@ export async function handle(vault, method, path, query, body, readOnly) {
       if (!symbol || !type) return ok([]);
       const point = (date, current, invested) => ({ date, Current: current, Invested: invested });
       const byDate = (a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0);
-      if (type === 'EQUITY') return ok(t.equity.filter(e => e.symbol === symbol).sort(byDate).map(e => point(e.date, e.current_value, e.invested_value)));
+      if (type === 'EQUITY') {
+        return ok([
+          ...t.equity.filter(e => e.symbol === symbol).sort(byDate).map(e => point(e.date, e.current_value, e.invested_value)),
+          ...t.stock_values.filter(s => s.symbol === symbol).sort(byDate).map(s => point(s.date, s.value, s.invested)),
+        ].sort(byDate));
+      }
       if (type === 'MF') {
         const data = [
           ...t.mf.filter(h => h.symbol === symbol).sort(byDate).map(h => point(h.date, h.current_value, h.invested_value)),
@@ -680,9 +925,9 @@ export async function handle(vault, method, path, query, body, readOnly) {
       const t = read();
       const latest = (rows) => rows.reduce((d, r) => (d === null || r.date > d ? r.date : d), null);
       const eqDay = latest(t.equity), mfDay = latest(t.mf), fundDay = latest(t.fund_values);
-      const eq = eqDay ? t.equity.filter(e => e.date === eqDay).map(e => e.symbol) : [];
+      const eq = [...(eqDay ? t.equity.filter(e => e.date === eqDay).map(e => e.symbol) : []), ...ownStocks(t, today).map(s => s.symbol)];
       const mf = [...(mfDay ? t.mf.filter(h => h.date === mfDay).map(h => h.symbol) : []),
-        ...(fundDay ? t.fund_values.filter(f => f.date === fundDay).map(f => f.name) : [])];
+        ...ownFunds(t, today).map(f => f.name)];
       const names = (cats) => t.assets.filter(a => cats.includes(a.category)).map(a => a.name);
       return ok({
         EQUITY: [...new Set(eq)].sort(), MF: [...new Set(mf)].sort(),
@@ -692,23 +937,26 @@ export async function handle(vault, method, path, query, body, readOnly) {
     if (method === 'GET' && path === '/equity') {
       const t = read();
       const day = t.equity.reduce((d, r) => (d === null || r.date > d ? r.date : d), null);
-      return ok(day ? t.equity.filter(e => e.date === day).map(({ symbol, quantity, average_price, ltp, invested_value, current_value }) =>
-        ({ symbol, quantity, average_price, ltp, invested_value, current_value })) : []);
+      return ok([
+        ...(day ? t.equity.filter(e => e.date === day).map(({ symbol, quantity, average_price, ltp, invested_value, current_value }) =>
+          ({ symbol, quantity, average_price, ltp, invested_value, current_value })) : []),
+        ...ownStocks(t, today).map(({ ret_pct: _, ...s }) => s),
+      ]);
     }
     if ((m = path.match(/^\/investments\/(\d{4}-\d{2}-\d{2})\/(equity_holdings|holdings)$/)) && method === 'GET') {
       const t = read(), day = m[1], kiteDay = lastKiteDay(t, day);
       if (m[2] === 'equity_holdings') {
-        return ok((kiteDay ? t.equity.filter(e => e.date === kiteDay) : []).map(h => ({
+        return ok([...(kiteDay ? t.equity.filter(e => e.date === kiteDay) : []).map(h => ({
           symbol: h.symbol, quantity: h.quantity, average_price: h.average_price, ltp: h.ltp,
           invested_value: h.invested_value, current_value: h.current_value, ret_pct: retPct(h.current_value, h.invested_value),
-        })));
+        })), ...ownStocks(t, day)]);
       }
       return ok([
         ...(kiteDay ? t.mf.filter(h => h.date === kiteDay) : []).map(h => ({
           symbol: h.symbol, quantity: h.quantity, average_price: h.average_price, nav: h.nav,
           invested_value: h.invested_value, current_value: h.current_value, ret_pct: retPct(h.current_value, h.invested_value),
         })),
-        ...t.fund_values.filter(f => f.date === day).map(f => ({
+        ...ownFunds(t, day).map(f => ({
           symbol: f.name, quantity: f.units, average_price: f.units ? Math.round(f.invested / f.units * 10000) / 10000 : 0,
           nav: f.nav, invested_value: f.invested, current_value: f.value, ret_pct: retPct(f.value, f.invested),
         })),
@@ -718,7 +966,7 @@ export async function handle(vault, method, path, query, body, readOnly) {
       if (!isDay(m[1])) throw new Refused('That isn’t a date');
       return ok(await write(t => {
         if (!t.snapshots.some(s => s.date === m[1])) throw new Refused('No snapshot that day', 404);
-        for (const name of ['snapshots', 'equity', 'mf', 'fund_values']) t[name] = t[name].filter(r => r.date !== m[1]);
+        for (const name of ['snapshots', 'equity', 'mf', 'fund_values', 'stock_values']) t[name] = t[name].filter(r => r.date !== m[1]);
         return { success: true };
       }));
     }
@@ -840,6 +1088,93 @@ export async function handle(vault, method, path, query, body, readOnly) {
       return ok({ success: false, message: 'Your investments are in your private vault, so they aren’t sent to Google Sheets.' });
     }
 
+    // ---- stocks and ETFs added by hand (stocks.py) ----
+    const stocksDone = async (t, extra = {}) => {
+      await valueStocks(t, today);
+      return { success: true, ...extra, stocks: stocksOverview(t), quoted_at: t.state.stocks_quoted_at || null };
+    };
+    if (path === '/stocks' && method === 'GET') {
+      if (!readOnly) await write(t => refreshStocks(t, false)).catch(() => {});
+      const t = read();
+      return ok({ success: true, stocks: stocksOverview(t), quoted_at: t.state.stocks_quoted_at || null });
+    }
+    if (path === '/stocks/search' && method === 'GET') {
+      const q = (query.get('q') || '').trim();
+      if (q.length < 2) return ok({ success: true, results: [] });
+      const words = q.toLowerCase().split(/\s+/).filter(Boolean);
+      const upper = q.toUpperCase();
+      const hits = (await listedStocks()).filter(r => words.every(w => r.symbol.toLowerCase().includes(w) || r.name.toLowerCase().includes(w)));
+      const rank = (r) => [r.symbol !== upper, !r.symbol.startsWith(upper), r.name.toLowerCase()];
+      hits.sort((a, b) => {
+        const x = rank(a), y = rank(b);
+        for (let i = 0; i < 3; i++) if (x[i] !== y[i]) return x[i] < y[i] ? -1 : 1;
+        return 0;
+      });
+      return ok({ success: true, results: hits.slice(0, 20) });
+    }
+    const tradeFields = (b) => {
+      const day = b?.date === undefined || b?.date === null || b?.date === '' ? today : (isDay(b.date) ? b.date : null);
+      if (day === null) throw new Refused('That isn’t a date');
+      const num = (v) => { const n = Number(v); return v === null || v === '' || !Number.isFinite(n) ? 0 : n; };
+      return { day, quantity: num(b?.quantity), price: num(b?.price) };
+    };
+    if (path === '/stocks' && method === 'POST') {
+      const listed = (await listedStocks()).find(r => r.symbol === String(body?.symbol || '').trim().toUpperCase());
+      if (!listed) throw new Refused('Pick a stock from the search');
+      return ok(await write(async t => {
+        const kiteDay = t.equity.reduce((d, r) => (d === null || r.date > d ? r.date : d), null);
+        if (kiteDay && t.equity.some(e => e.date === kiteDay && e.symbol.toUpperCase() === listed.symbol)) throw new Refused('Kite already tracks this stock', 409);
+        let stock = t.stocks.find(s => s.symbol === listed.symbol);
+        if (!stock) {
+          stock = { id: newId(), symbol: listed.symbol, name: listed.name, isin: listed.isin, quantity: 0, invested: 0, updated_at: istNow() };
+          t.stocks.push(stock);
+        }
+        const { day, quantity, price } = tradeFields(body);
+        stockTrade(t, stock, 'BUY', quantity, price, day);
+        return stocksDone(t, { added: stock.symbol });
+      }));
+    }
+    if ((m = path.match(/^\/stocks\/([^/]+)\/trades$/)) && method === 'POST') {
+      const symbol = decodeURIComponent(m[1]).toUpperCase();
+      return ok(await write(async t => {
+        const stock = t.stocks.find(s => s.symbol === symbol);
+        if (!stock) throw new Refused('No such stock', 404);
+        const { day, quantity, price } = tradeFields(body);
+        stockTrade(t, stock, String(body?.kind || '').toUpperCase(), quantity, price, day);
+        return stocksDone(t);
+      }));
+    }
+    const removeStock = (t, stock) => {
+      t.stock_trades = t.stock_trades.filter(x => x.stock_id !== stock.id);
+      t.stock_values = t.stock_values.filter(v => v.symbol !== stock.symbol);
+      t.stocks = t.stocks.filter(s => s !== stock);
+    };
+    if ((m = path.match(/^\/stocks\/([^/]+)\/trades\/(\d+)$/)) && method === 'DELETE') {
+      const symbol = decodeURIComponent(m[1]).toUpperCase(), id = Number(m[2]);
+      return ok(await write(async t => {
+        const stock = t.stocks.find(s => s.symbol === symbol);
+        if (!stock || !t.stock_trades.some(x => x.id === id && x.stock_id === stock.id)) throw new Refused('No such trade', 404);
+        t.stock_trades = t.stock_trades.filter(x => x.id !== id);
+        const left = t.stock_trades.filter(x => x.stock_id === stock.id);
+        try {
+          replayStock(stock, left);
+        } catch (e) {
+          throw new Refused(`${e.message}, so that buy can’t go`);
+        }
+        if (!left.length) removeStock(t, stock);
+        return stocksDone(t);
+      }));
+    }
+    if ((m = path.match(/^\/stocks\/([^/]+)$/)) && method === 'DELETE') {
+      const symbol = decodeURIComponent(m[1]).toUpperCase();
+      return ok(await write(async t => {
+        const stock = t.stocks.find(s => s.symbol === symbol);
+        if (!stock) throw new Refused('No such stock', 404);
+        removeStock(t, stock);
+        return stocksDone(t);
+      }));
+    }
+
     // ---- funds held outside Kite (funds.py) ----
     const done = async (t, extra = {}) => {
       await valueFunds(t, today);
@@ -870,15 +1205,22 @@ export async function handle(vault, method, path, query, body, readOnly) {
       if (!scheme) throw new Refused('Pick a fund from the search');
       return ok(await write(async t => {
         if (kiteTrackedNames(t).has(scheme.name.toLowerCase())) throw new Refused('Kite already tracks this fund', 409);
+        // What's held already, as a fund app shows it: units at an average NAV.
+        const given = (v) => v !== null && v !== undefined && v !== '';
+        const positive = (v, most) => { const n = Number(v); return given(v) && Number.isFinite(n) && n > 0 && n <= most ? n : null; };
+        const holding = given(body.units) || given(body.avg_nav);
+        const units = positive(body.units, 1_00_00_00_000), avgNav = positive(body.avg_nav, 10_00_000);
+        if (holding && units === null) throw new Refused('Enter the units you hold');
+        if (holding && avgNav === null) throw new Refused('Enter the average NAV');
         const lumpsum = body.amount !== null && body.amount !== undefined && body.amount !== '';
         const amount = parseAmount(body.amount), day = parseDay(body.date) || today;
         if (lumpsum && amount === null) throw new Refused('Enter the amount invested');
         if (lumpsum && day > today) throw new Refused('That date is in the future');
         const [sip, error] = body.sip ? sipFields(body.sip) : [null, null];
         if (error) throw new Refused(error);
-        if (!lumpsum && !sip) throw new Refused('Enter an amount, a SIP, or both');
+        if (!lumpsum && !holding && !sip) throw new Refused('Enter what you hold, an amount, or a SIP');
         // A SIP belongs with the statement's folio when there is one.
-        let fund = sip && !lumpsum
+        let fund = sip && !lumpsum && !holding
           ? t.funds.filter(f => f.amfi_code === scheme.code && f.folio_ref !== MANUAL_FOLIO).sort((a, b) => b.units - a.units)[0]
           : null;
         if (!fund) {
@@ -888,6 +1230,13 @@ export async function handle(vault, method, path, query, body, readOnly) {
               folio_ref: MANUAL_FOLIO, folio_tail: null, units: 0, invested: 0, source: 'manual', statement_to: null, updated_at: istNow() };
             t.funds.push(fund);
           }
+        }
+        if (holding) {
+          const amountHeld = r2(units * avgNav);
+          t.fund_tx.push({ id: newId(), fund_id: fund.id, date: today, kind: 'HOLDING', amount: amountHeld, units, nav: avgNav,
+            source: 'manual', key: await fundKey('holding', fund.id, today, pyStr(units), pyStr(avgNav), Date.now() / 1000) });
+          fund.units = r3((fund.units || 0) + units);
+          fund.invested = Number(fund.invested || 0) + amountHeld;
         }
         if (lumpsum) {
           const priced = await navOn(fund.amfi_code, day);
@@ -963,6 +1312,8 @@ export function lockedAnswer(method, path) {
     if (path === '/investments/xirr') return { status: 200, body: { success: true, xirr: 0 } };
     if (path === '/investments/prices') return { status: 200, body: { mode: 'manual', synced: null, stocks_at: null, checked_at: null, stale: false, closed_today: false } };
     if (path === '/funds') return { status: 200, body: { success: true, funds: [] } };
+    if (path === '/stocks') return { status: 200, body: { success: true, stocks: [], quoted_at: null } };
+    if (path === '/stocks/search') return { status: 200, body: { success: true, results: [] } };
     if (path === '/funds/search') return { status: 200, body: { success: true, results: [] } };
     return { status: 200, body: [] };
   }
@@ -971,4 +1322,4 @@ export function lockedAnswer(method, path) {
 }
 
 /** Whether a path is one of the Investments requests the vault answers. */
-export const isInvestPath = (path) => /^\/(investments(\/|$)|manual_assets(\/|$)|assets\/list$|equity$|cron\/(process-recurring|tasks)(\/|$)|sync\/(kite|investments-to-sheets)$|funds(\/|$))/.test(path);
+export const isInvestPath = (path) => /^\/(investments(\/|$)|manual_assets(\/|$)|assets\/list$|equity$|cron\/(process-recurring|tasks)(\/|$)|sync\/(kite|investments-to-sheets)$|funds(\/|$)|stocks(\/|$))/.test(path);

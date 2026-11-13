@@ -11093,3 +11093,30 @@ button.acct-avg-row:hover { background: rgba(var(--accent-rgb), 0.08); }
   .vault-how-row { padding-left: 0; }
   .vault-unlock.compact { width: 100%; }
 }
+
+/* Adding a fund: held already, or a new purchase */
+.fd-mode { width: 100%; margin-bottom: 0.25rem; }
+.fd-mode .ac-seg-btn { flex: 1; }
+.fd-grid.sip.two { grid-template-columns: 1fr 1fr; }
+.fd-grid.sip.two .fd-field:last-child { grid-column: auto; }
+
+/* ── Stocks added by hand (components/StocksModal.jsx), on the funds window's fd-* styles ── */
+.fd-options.one { grid-template-columns: 1fr; max-width: 380px; margin-inline: auto; }
+.sk-asof { display: block; font-size: 0.72rem; margin-top: 0.15rem; }
+.sk-modal .fd-cell.avg { display: none; }
+.sk-trades { list-style: none; margin: 0 0 0.35rem; padding: 0; }
+.sk-trades li { display: flex; align-items: center; gap: 0.65rem; padding: 0.4rem 0; font-size: 0.82rem; font-variant-numeric: tabular-nums;
+  border-top: 1px dashed var(--border); }
+.sk-trades li:first-child { border-top: none; }
+.sk-trades li > .fd-muted { margin-left: auto; }
+.sk-kind { font-weight: 700; min-width: 3.6rem; }
+.sk-kind.buy { color: var(--pos); }
+.sk-kind.sell { color: var(--accent-text); }
+.sk-x { padding: 0.15rem; opacity: 0.55; }
+.sk-x:hover { opacity: 1; }
+@media (min-width: 960px) {
+  .sk-modal .fd-thead, .sk-modal .fd-fund-main { grid-template-columns: minmax(0, 2fr) minmax(0, 0.8fr) repeat(3, minmax(0, 1fr)) minmax(0, 1.35fr);
+    grid-template-areas: "name units avg invested value returns"; }
+  .sk-modal .fd-cell.avg { display: block; grid-area: avg; color: var(--text3); }
+  .sk-modal .fd-add.picked { grid-template-columns: 1fr; }
+}

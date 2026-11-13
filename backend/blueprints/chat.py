@@ -21,11 +21,13 @@ from blueprints.routines import chat_context as routines_chat_context, routine_n
 
 chat_bp = Blueprint("chat", __name__)
 
-# Nagapandi only ever needs these tables; anything else in generated SQL is refused.
+# Tables Nagapandi never reads; generated SQL naming one is refused. Other people's
+# emails and settings, the private vault's keys and grants, and the catalogues.
 # Routines are personal, so they're never queried directly: Nagapandi is handed
 # the asking person's own, worked out (see _routines_rule).
 CHAT_BLOCKED = re.compile(
-    r"\b(pg_\w*|information_schema|allowed_emails|user_settings|device_tokens|accounts|budgets|splits|sync_log|routines|routine_\w+)\b",
+    r"\b(pg_\w*|information_schema|allowed_emails|user_settings|device_tokens|accounts|budgets|splits|routines|routine_\w+"
+    r"|shares|access_requests|vault_\w+)\b",
     re.IGNORECASE,
 )
 # Naming a schema ("public.transactions") is the one way past _owner_rows_only.

@@ -84,6 +84,10 @@ let infoPromise = null;
 let session = null;       // { owner, dk, dataKey, mine, readOnly, tables, saved: {id: {rev, json}} }
 let lock = Promise.resolve();
 let moving = false;
+// Whether this device has tried its remembered key yet: until it has, the vault
+// is "opening", not locked, so no passphrase card flashes up meanwhile.
+let rememberTried = false;
+let remembering = null;
 
 const emit = () => listeners.forEach(fn => { try { fn(); } catch { /* a listener's own problem */ } });
 
@@ -97,7 +101,10 @@ export async function status(force = false) {
   const view = getViewAs() || null;
   if (!force && info && infoFor === view) return info;
   if (!force && infoPromise && infoFor === view) return infoPromise;
-  if (infoFor !== view) session = null;
+  if (infoFor !== view) {
+    session = null;
+    rememberTried = false;
+  }
   infoFor = view;
   infoPromise = call('GET', '/vault').then(r => {
     if (infoFor === view) {
@@ -117,6 +124,7 @@ export function snapshot() {
   if (info.state === 'on' && !session) {
     if (!info.me) reason = 'no-keys';
     else if (viewing && !info.grant) reason = 'no-grant';
+    else if (!rememberTried) reason = 'opening';
     else reason = 'locked';
   }
   return {
@@ -159,19 +167,26 @@ async function openWith(myDataKey, { remember } = {}) {
 }
 
 /** Opens it with the key this device kept, if it kept one. */
-export async function tryRemembered() {
-  if (session) return true;
-  const v = await status();
-  if (v.state !== 'on' || !v.me) return false;
-  if (v.owner !== v.email && !v.grant) return false;
-  const key = await recallKey(v.email);
-  if (!key) return false;
-  try {
-    await openWith(key);
-    return true;
-  } catch {
-    return false;
-  }
+export function tryRemembered() {
+  if (session) return Promise.resolve(true);
+  remembering ||= (async () => {
+    try {
+      const v = await status();
+      if (v.state !== 'on' || !v.me) return false;
+      if (v.owner !== v.email && !v.grant) return false;
+      const key = await recallKey(v.email);
+      if (!key) return false;
+      await openWith(key);
+      return true;
+    } catch {
+      return false;
+    } finally {
+      rememberTried = true;
+      remembering = null;
+      emit();
+    }
+  })();
+  return remembering;
 }
 
 /** Unlock with the passphrase (or, with {recovery: true}, the recovery key). */
@@ -194,6 +209,7 @@ export async function lockNow() {
   const v = await status();
   await forgetKey(v.email);
   session = null;
+  rememberTried = true;
   emit();
 }
 
@@ -383,6 +399,7 @@ export function reset() {
   info = null;
   infoFor = undefined;
   session = null;
+  rememberTried = false;
   emit();
 }
 

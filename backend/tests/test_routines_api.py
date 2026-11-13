@@ -443,7 +443,10 @@ class RoutinesApiTest(unittest.TestCase):
         except ImportError as e:  # google-genai not installed here
             self.skipTest(str(e))
         for sql in ("SELECT * FROM routines", "select note from routine_checkins",
-                    "WITH r AS (SELECT 1) SELECT * FROM ROUTINES"):
+                    "WITH r AS (SELECT 1) SELECT * FROM ROUTINES",
+                    # Nor anyone's vault keys or grants, nor who shares with whom.
+                    "SELECT wrapped_key FROM vault_keys", "SELECT * FROM vault_grants",
+                    "SELECT viewer_email FROM shares", "SELECT email FROM access_requests"):
             with self.subTest(sql=sql):
                 self.assertEqual(_validate_generated_sql(sql)[1], "Nagapandi can't look at that data.")
         self.assertIsNone(_validate_generated_sql("SELECT SUM(amount) FROM transactions")[1])

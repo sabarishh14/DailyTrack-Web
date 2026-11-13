@@ -85,14 +85,14 @@ class RepriceTest(KiteDailyCase):
         self.assertEqual([e.ltp for e in self.rows(EquityHolding, date=SYNCED)], [1500])
 
     def test_a_later_day_on_the_same_holdings_takes_the_new_prices(self):
-        """Today's record (funds valued today) while the prices are still the last
-        trading day's close: it adds up the repriced stocks, not the sync's."""
+        """A later record (funds valued at that day's NAV) while the stock prices are still
+        the last trading day's close: it adds up the repriced stocks, not the sync's."""
         from models import FundValue
         self.kite_synced(OWNER, SYNCED)
         later = TRADING_DAY + timedelta(days=1)
         with self.app.app_context():
             db.session.add(FundValue(id=9, owner_email=OWNER, date=later, amfi_code="120503", name="Axis ELSS", units=1,
-                                     nav=50, nav_date=TRADING_DAY, invested=40, value=50))
+                                     nav=50, nav_date=later, invested=40, value=50))
             db.session.add(PortfolioSnapshot(id=9, owner_email=OWNER, date=later, total_equity_inv=2000, total_equity_curr=3000))
             db.session.commit()
         self.daily()

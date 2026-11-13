@@ -3,20 +3,22 @@
 // so a day's update re-locks one small item, not years of history.
 import { sha256Hex } from './crypto';
 
-export const TABLES = ['snapshots', 'equity', 'mf', 'assets', 'tasks', 'funds', 'fund_tx', 'sips', 'fund_values'];
-const DAILY = ['snapshots', 'equity', 'mf', 'fund_values'];
+export const TABLES = ['snapshots', 'equity', 'mf', 'assets', 'tasks', 'funds', 'fund_tx', 'sips', 'fund_values',
+  'stocks', 'stock_trades', 'stock_values'];
+const DAILY = ['snapshots', 'equity', 'mf', 'fund_values', 'stock_values'];
 
 export function emptyTables() {
   const t = Object.fromEntries(TABLES.map(name => [name, []]));
-  t.state = { priced_at: null, quoted_at: null, quotes_seen_at: null };
+  t.state = { priced_at: null, quoted_at: null, quotes_seen_at: null, stocks_priced_at: null, stocks_quoted_at: null };
   return t;
 }
 
-/** {item id: value}: "assets", "funds", "state", and "day:YYYY-MM" for each month. */
+/** {item id: value}: "assets", "funds", "stocks", "state", and "day:YYYY-MM" for each month. */
 export function toItems(t) {
   const items = {
     assets: { assets: t.assets, tasks: t.tasks },
     funds: { funds: t.funds, fund_tx: t.fund_tx, sips: t.sips },
+    stocks: { stocks: t.stocks, stock_trades: t.stock_trades },
     state: t.state,
   };
   for (const name of DAILY) {

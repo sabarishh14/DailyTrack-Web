@@ -15,6 +15,8 @@ funds_bp = Blueprint("funds", __name__)
 
 MAX_STATEMENT_BYTES = 10 * 1024 * 1024
 MAX_AMOUNT = 10_00_00_000
+MAX_UNITS = 1_00_00_00_000
+MAX_NAV = 10_00_000
 
 
 def _bad(message, status=400):
@@ -27,6 +29,14 @@ def _amount(value):
     except (TypeError, ValueError):
         return None
     return amount if 0 < amount <= MAX_AMOUNT else None
+
+
+def _positive(value, most):
+    try:
+        n = float(value)
+    except (TypeError, ValueError):
+        return None
+    return n if 0 < n <= most else None
 
 
 def _date(value):
@@ -85,8 +95,9 @@ def search_funds():
 @funds_bp.route('/api/funds', methods=['POST'])
 @require_access("invest")
 def add_fund():
-    """{code, amount?, date?, sip?: {amount, day, since}}: a lump sum on a day,
-    a monthly SIP since a day (past instalments filled in), or both."""
+    """{code, units?, avg_nav?, amount?, date?, sip?: {amount, day, since}}: what's
+    held already (units at an average NAV), a lump sum on a day, a monthly SIP
+    since a day (past instalments filled in), or a mix."""
     body = request.json or {}
     try:
         scheme = funds.scheme_for(body.get("code"))
@@ -97,6 +108,12 @@ def add_fund():
     if scheme["name"].lower() in funds.kite_tracked_names():
         return _bad("Kite already tracks this fund", 409)
 
+    holding = body.get("units") not in (None, "") or body.get("avg_nav") not in (None, "")
+    units, avg_nav = _positive(body.get("units"), MAX_UNITS), _positive(body.get("avg_nav"), MAX_NAV)
+    if holding and units is None:
+        return _bad("Enter the units you hold")
+    if holding and avg_nav is None:
+        return _bad("Enter the average NAV")
     lumpsum = body.get("amount") not in (None, "")
     amount, day = _amount(body.get("amount")), _date(body.get("date")) or funds.ist_today()
     if lumpsum and amount is None:
@@ -106,15 +123,17 @@ def add_fund():
     sip, error = _sip_fields(body["sip"]) if body.get("sip") else (None, None)
     if error:
         return _bad(error)
-    if not lumpsum and sip is None:
-        return _bad("Enter an amount, a SIP, or both")
+    if not lumpsum and not holding and sip is None:
+        return _bad("Enter what you hold, an amount, or a SIP")
 
     try:
         # A SIP belongs with the statement's folio when there is one, so the
         # next import replaces the instalments it covers instead of adding to them.
         fund = (Fund.query.filter(Fund.amfi_code == scheme["code"], Fund.folio_ref != funds.MANUAL_FOLIO)
-                .order_by(Fund.units.desc()).first()) if sip and not lumpsum else None
+                .order_by(Fund.units.desc()).first()) if sip and not lumpsum and not holding else None
         fund = fund or funds.manual_fund(scheme)
+        if holding:
+            funds.add_holding(fund, units, avg_nav, funds.ist_today())
         if lumpsum:
             funds.add_lumpsum(fund, amount, day)
         if sip:

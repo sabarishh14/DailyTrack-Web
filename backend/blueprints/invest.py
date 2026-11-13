@@ -14,6 +14,7 @@ from models import *
 from access import require_api_key, require_admin, require_access, current_access, owner_only
 import funds_service
 import kite_daily
+import stocks_service
 
 import hashlib
 from dateutil.relativedelta import relativedelta
@@ -181,8 +182,14 @@ def get_investments():
     # never calls the cron above. ?refresh=1 (a refresh by hand) asks for
     # prices and NAVs now.
     fresh = request.args.get('refresh') == '1'
+    try:
+        funds_service.tidy_fund_days()
+    except Exception as e:   # never stops the page loading; the next look tries again
+        db.session.rollback()
+        print(f"⚠️ Couldn't tidy fund records: {e!r}")
     kite_daily.reprice_if_due(fresh=fresh)
     funds_service.refresh_if_due(fresh=fresh)
+    stocks_service.refresh_if_due(fresh=fresh)
     if refresh_recurring_deposits(datetime.now(pytz.timezone('Asia/Kolkata')).date()):
         update_latest_portfolio_snapshot()
     records = PortfolioSnapshot.query.order_by(PortfolioSnapshot.date.desc()).all()
@@ -434,18 +441,32 @@ def edit_manual_asset(aid):
 def get_equity():
     # Fetch the latest available equity snapshot
     latest_date = db.session.query(db.func.max(EquityHolding.date)).scalar()
-    if not latest_date:
-        return jsonify([])
-        
-    records = EquityHolding.query.filter_by(date=latest_date).all()
-    return jsonify([{
+    records = EquityHolding.query.filter_by(date=latest_date).all() if latest_date else []
+    rows = [{
         "symbol": r.symbol,
         "quantity": r.quantity,
         "average_price": r.average_price,
         "ltp": r.ltp,
         "invested_value": r.invested_value,
         "current_value": r.current_value
-    } for r in records])
+    } for r in records]
+    # And stocks added by hand, at their latest prices.
+    return jsonify(rows + [{k: v for k, v in r.items() if k != "ret_pct"} for r in _own_stocks(funds_service.ist_today())])
+
+
+def _own_stocks(day):
+    """Stocks added by hand as they stood on `day` (their last values on or before it), held ones."""
+    stock_day = funds_service.last_stock_day(day)
+    rows = StockValue.query.filter(StockValue.date == stock_day, StockValue.quantity > 0).all() if stock_day else []
+    return [{
+        "symbol": s.symbol,
+        "quantity": s.quantity,
+        "average_price": round(s.invested / s.quantity, 4) if s.quantity else 0,
+        "ltp": s.price,
+        "invested_value": s.invested,
+        "current_value": s.value,
+        "ret_pct": ((s.value - s.invested) / s.invested * 100) if s.invested > 0 else 0
+    } for s in rows]
 class KiteError(Exception):
     """Kite couldn't be read, with a message fit to show."""
 
@@ -543,7 +564,7 @@ def delete_snapshot(date_str):
         return jsonify({"success": False, "message": "That isn't a date"}), 400
     if not PortfolioSnapshot.query.filter_by(date=day).first():
         return jsonify({"success": False, "message": "No snapshot that day"}), 404
-    for model in (PortfolioSnapshot, EquityHolding, MutualFundHolding, FundValue):
+    for model in (PortfolioSnapshot, EquityHolding, MutualFundHolding, FundValue, StockValue):
         model.query.filter_by(date=day).delete(synchronize_session=False)
     db.session.commit()
     return jsonify({"success": True})
@@ -567,7 +588,7 @@ def get_daily_equity_holdings(date_str):
         "invested_value": h.invested_value,
         "current_value": h.current_value,
         "ret_pct": ((h.current_value - h.invested_value) / h.invested_value * 100) if h.invested_value > 0 else 0
-    } for h in holdings])
+    } for h in holdings] + _own_stocks(date_obj))
 @invest_bp.route('/api/sync/investments-to-sheets', methods=['POST'])
 @require_access("invest")
 def sync_investments_to_sheets():
@@ -640,20 +661,25 @@ def get_daily_holdings(date_str):
         "invested_value": f.invested,
         "current_value": f.value,
         "ret_pct": ((f.value - f.invested) / f.invested * 100) if f.invested > 0 else 0
-    } for f in FundValue.query.filter_by(date=date_obj).all()]
+    } for f in _own_funds(date_obj)]
     return jsonify(rows)
+
+
+def _own_funds(day):
+    """Funds held outside Kite as they stood on `day`: their last values on or before it, held ones."""
+    fund_day = funds_service.last_fund_day(day)
+    return FundValue.query.filter(FundValue.date == fund_day, FundValue.units > 0).all() if fund_day else []
 @invest_bp.route('/api/assets/list', methods=['GET'])
 @require_access("invest")
 def get_asset_list():
     # Dynamically pull all unique assets you currently own
     latest_eq_date = db.session.query(db.func.max(EquityHolding.date)).scalar()
     eq_symbols = [r[0] for r in db.session.query(EquityHolding.symbol).filter(EquityHolding.date == latest_eq_date).all()] if latest_eq_date else []
+    eq_symbols += [s["symbol"] for s in _own_stocks(funds_service.ist_today())]
     
     latest_mf_date = db.session.query(db.func.max(MutualFundHolding.date)).scalar()
     mf_symbols = [r[0] for r in db.session.query(MutualFundHolding.symbol).filter(MutualFundHolding.date == latest_mf_date).all()] if latest_mf_date else []
-    latest_fund_day = db.session.query(db.func.max(FundValue.date)).scalar()
-    if latest_fund_day:
-        mf_symbols += [r[0] for r in db.session.query(FundValue.name).filter(FundValue.date == latest_fund_day).all()]
+    mf_symbols += [f.name for f in _own_funds(funds_service.ist_today())]
     
     manual_assets = ManualAsset.query.all()
     
@@ -677,6 +703,9 @@ def get_asset_history():
     if asset_type == 'EQUITY':
         history = EquityHolding.query.filter_by(symbol=symbol).order_by(EquityHolding.date.asc()).all()
         data = [{"date": h.date.strftime("%Y-%m-%d"), "Current": h.current_value, "Invested": h.invested_value} for h in history]
+        own = StockValue.query.filter_by(symbol=symbol).order_by(StockValue.date.asc()).all()
+        data += [{"date": s.date.strftime("%Y-%m-%d"), "Current": s.value, "Invested": s.invested} for s in own]
+        data.sort(key=lambda point: point["date"])
     elif asset_type == 'MF':
         history = MutualFundHolding.query.filter_by(symbol=symbol).order_by(MutualFundHolding.date.asc()).all()
         data = [{"date": h.date.strftime("%Y-%m-%d"), "Current": h.current_value, "Invested": h.invested_value} for h in history]

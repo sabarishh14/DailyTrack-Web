@@ -108,7 +108,7 @@ function UnlockForm({ onDone, compact }) {
 /** Over Investments while the vault is locked (or a friend's can't be opened yet). */
 export function VaultGate({ onUnlocked }) {
   const v = useVault();
-  if (v.state !== 'on' || v.open) return null;
+  if (v.state !== 'on' || v.open || v.reason === 'opening') return null;
   return (
     <div className="vault-gate">
       <div className="vault-gate-card">
@@ -383,7 +383,7 @@ export function VaultSettings({ Row, onRefresh, onToast }) {
   if (v.state === 'unknown') return <Row icon="🔒" title="Private vault" desc="Checking…" />;
 
   const turnOff = async () => {
-    if (!window.confirm('Turn off the private vault? Your investments go back to being stored readable on the server.')) return;
+    if (!window.confirm('Turn off encryption? Your investments are decrypted and stored readable on the server again, for every device. You can turn it on again any time.')) return;
     setBusy('Putting them back…');
     try {
       await vault.turnOff({ progress: setBusy });
@@ -412,9 +412,10 @@ export function VaultSettings({ Row, onRefresh, onToast }) {
           <button className="action-btn" onClick={() => setModal('on')} disabled={v.moving}>Turn on</button>
         </Row>
       ) : v.open ? (
-        <Row icon="🔒" title="Private vault" desc="On. Only your devices can read your investments." status={busy ? { text: busy } : { kind: 'ok', text: 'Unlocked on this device' }}>
-          <button className="action-btn secondary" onClick={lock} disabled={!!busy}>Lock</button>
-        </Row>
+        <Row icon="🔒" title="Private vault" desc="On. Your investments are encrypted; only your devices can read them."
+             status={busy ? { text: busy } : { kind: 'ok', text: 'Unlocked on this device' }} />
+      ) : v.reason === 'opening' ? (
+        <Row icon="🔒" title="Private vault" desc="On." status={{ text: 'Opening…' }} />
       ) : (
         <Row icon="🔒" title="Private vault" desc="On, and locked on this device.">
           <UnlockForm compact onDone={onRefresh} />
@@ -435,7 +436,10 @@ export function VaultSettings({ Row, onRefresh, onToast }) {
               desc={friends.map(f => `${f.viewer}: ${f.granted ? 'can open it' : 'once they turn on their vault'}`).join(' · ')}
             />
           )}
-          <Row icon="🔓" title="Turn off" desc="Store your investments readable on the server again.">
+          <Row icon="🔐" title="Lock this device" desc="They stay encrypted. This device asks for the passphrase next time.">
+            <button className="action-btn secondary" onClick={lock} disabled={!!busy}>Lock</button>
+          </Row>
+          <Row icon="🔓" title="Turn off encryption" desc="Decrypts your investments and stores them readable on the server again, for every device.">
             <button className="action-btn secondary" onClick={turnOff} disabled={!!busy}>Turn off</button>
           </Row>
         </>

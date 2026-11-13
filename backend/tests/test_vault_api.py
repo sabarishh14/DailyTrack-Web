@@ -160,7 +160,7 @@ class VaultApiTest(unittest.TestCase):
     def owner_has_funds_and_kite(self):
         from datetime import date
         from flask import g
-        from models import EquityHolding, Fund, FundSip, FundTransaction, FundValue
+        from models import EquityHolding, Fund, FundSip, FundTransaction, FundValue, Stock, StockTrade, StockValue
         with self.app.test_request_context():
             g.data_owner = OWNER
             fund = Fund(id=7, amfi_code="120503", name="Axis ELSS", folio_ref="ab12", folio_tail="1234",
@@ -173,9 +173,16 @@ class VaultApiTest(unittest.TestCase):
                 FundSip(id=2, fund_id=7, amount=500, day=5, next_date=date(2026, 12, 5), active=True),
                 FundValue(id=3, date=date(2026, 11, 10), amfi_code="120503", name="Axis ELSS", units=10.5,
                           nav=99.1, nav_date=date(2026, 11, 7), invested=1000.25, value=1040.55),
+                Stock(id=1731000000000500, symbol="TCS", name="Tata Consultancy Services Limited", isin="INE467B01029",
+                      quantity=2, invested=6000),
+                StockValue(id=1731000000000502, date=date(2026, 11, 10), symbol="TCS", name="Tata Consultancy Services Limited",
+                           quantity=2, price=3500, invested=6000, value=7000),
                 EquityHolding(id=1731000000000123, date=date(2026, 11, 10), symbol="INFY", quantity=3,
                               average_price=1400, ltp=1500.5, invested_value=4200, current_value=4501.5, repriced=True),
             ])
+            db.session.flush()
+            db.session.add(StockTrade(id=1731000000000501, stock_id=1731000000000500, date=date(2026, 10, 1), kind="BUY",
+                                      quantity=2, price=3000))
             db.session.commit()
 
     def test_turning_off_puts_everything_back(self):

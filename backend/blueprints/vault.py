@@ -35,8 +35,8 @@ import kite_daily
 from access import current_access, require_api_key
 from extensions import db
 from models import (EquityHolding, Fund, FundSip, FundTransaction, FundValue, ManualAsset, MutualFundHolding,
-                    PortfolioSnapshot, RecurringTask, Share, Transaction, UserSettings, VaultGrant, VaultItem,
-                    VaultKey)
+                    PortfolioSnapshot, RecurringTask, Share, Stock, StockTrade, StockValue, Transaction, UserSettings,
+                    VaultGrant, VaultItem, VaultKey)
 from tenancy import data_owner
 
 vault_bp = Blueprint("vault", __name__)
@@ -52,8 +52,12 @@ TABLES = {
     "fund_tx": FundTransaction,
     "sips": FundSip,
     "fund_values": FundValue,
+    "stocks": Stock,
+    "stock_trades": StockTrade,
+    "stock_values": StockValue,
 }
-STATE_FIELDS = {"priced_at": "kite_priced_at", "quoted_at": "kite_quoted_at", "quotes_seen_at": "kite_quotes_seen_at"}
+STATE_FIELDS = {"priced_at": "kite_priced_at", "quoted_at": "kite_quoted_at", "quotes_seen_at": "kite_quotes_seen_at",
+                "stocks_priced_at": "stocks_priced_at", "stocks_quoted_at": "stocks_quoted_at"}
 ITEM_ID = re.compile(r"^[a-z_]{1,16}(:[0-9A-Za-z_-]{1,20})?$")
 B64 = re.compile(r"^[A-Za-z0-9+/=_-]+$")
 MAX_ITEM = 4 * 1024 * 1024
@@ -363,7 +367,8 @@ def finish_move():
         return _bad("The locked copy didn't match, so nothing was removed. Try again.", 409,
                     code="VAULT_MISMATCH", tables=mismatched)
     # Children before parents (fund transactions and SIPs belong to funds).
-    for name in ("fund_tx", "sips", "fund_values", "funds", "equity", "mf", "snapshots", "tasks", "assets"):
+    for name in ("fund_tx", "sips", "fund_values", "funds", "stock_trades", "stock_values", "stocks",
+                 "equity", "mf", "snapshots", "tasks", "assets"):
         TABLES[name].query.delete(synchronize_session=False)
     settings = db.session.get(UserSettings, me)
     if settings is not None:
@@ -423,7 +428,8 @@ def restore():
     if any(model.query.first() is not None for model in TABLES.values()):
         return _bad("There are readable investments already; nothing was changed", 409)
     try:
-        for name in ("assets", "tasks", "snapshots", "equity", "mf", "funds", "fund_tx", "sips", "fund_values"):
+        for name in ("assets", "tasks", "snapshots", "equity", "mf", "funds", "fund_tx", "sips", "fund_values",
+                     "stocks", "stock_trades", "stock_values"):
             model, cols = TABLES[name], _columns(TABLES[name])
             names = {c.name: c for c in cols}
             for rec in tables.get(name) or []:
@@ -524,6 +530,23 @@ def navs():
             for s in by_code.values() if s["date"] >= since]
     resp = jsonify({"success": True, "navs": rows})
     resp.headers["Cache-Control"] = "private, max-age=600"
+    return resp
+
+
+@vault_bp.route('/api/vault/stock-list', methods=['GET'])
+@require_api_key
+def stock_list():
+    """Every NSE stock and ETF, [symbol, name, ISIN]: searched on the device, so
+    the server never learns which one was looked for."""
+    if not _can_view_invest():
+        return _bad("You need access to Investments", 403)
+    import stocks_service
+    try:
+        rows = stocks_service.stock_list()
+    except stocks_service.ListUnavailable as e:
+        return _bad(str(e), 503)
+    resp = jsonify({"success": True, "stocks": [[r["symbol"], r["name"], r["isin"]] for r in rows]})
+    resp.headers["Cache-Control"] = "private, max-age=3600"
     return resp
 
 

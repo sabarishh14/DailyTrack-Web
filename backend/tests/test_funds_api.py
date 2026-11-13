@@ -22,7 +22,7 @@ import funds_service  # noqa: E402
 from blueprints.funds import funds_bp  # noqa: E402
 from blueprints.invest import invest_bp  # noqa: E402
 from extensions import db  # noqa: E402
-from models import EquityHolding, Fund, FundSip, FundTransaction, MutualFundHolding, PortfolioSnapshot  # noqa: E402
+from models import EquityHolding, Fund, FundSip, FundTransaction, FundValue, MutualFundHolding, PortfolioSnapshot  # noqa: E402
 
 OWNER, FRIEND = setup.OWNER, people.FRIEND
 TODAY = funds_service.ist_today()
@@ -179,6 +179,42 @@ class FundsApiTest(ApiCase):
         self.imported(statement())
         funds = self.ok("GET", "/api/funds")["funds"]
         self.assertEqual([(f["units"], f["sources"]) for f in funds], [(10.0, ["cas"])])
+
+    def test_a_fund_already_held_is_added_by_its_units_and_average_nav(self):
+        """As a fund app shows it: what went in is exactly units x average NAV, worth today's NAV."""
+        result = self.ok("POST", "/api/funds", body={"code": "122639", "units": 152.347, "avg_nav": 71.25})
+        fund = result["funds"][0]
+        self.assertEqual((fund["units"], fund["invested"], fund["value"]), (152.347, round(152.347 * 71.25, 2), round(152.347 * 90, 2)))
+        snap = self.ok("GET", "/api/investments")[0]
+        self.assertEqual((snap["inv_mf"], snap["curr_mf"]), (round(152.347 * 71.25, 2), round(152.347 * 90, 2)))
+        # With its SIP carrying on from the next instalment.
+        both = self.ok("POST", "/api/funds", body={"code": "118950", "units": 10, "avg_nav": 200,
+                                                  "sip": {"amount": 1000, "day": 28, "since": TODAY.isoformat()}})
+        hdfc = next(f for f in both["funds"] if f["code"] == "118950")
+        self.assertEqual((hdfc["units"], hdfc["invested"], len(hdfc["sips"])), (10.0, 2000.0, 1))
+
+    def test_a_days_nav_is_filed_under_its_own_day(self):
+        """A look in the morning, with yesterday's NAV the latest: yesterday's record, not today's."""
+        yday = TODAY - timedelta(days=1)
+        older = {code: {**s, "date": yday} for code, s in NAVS.items()}
+        with mock.patch.dict(funds_service._navs, {"by_code": older, "by_isin": {i: s for s in older.values() for i in s["isins"]}}):
+            self.ok("POST", "/api/funds", body={"code": "122639", "units": 10, "avg_nav": 80})
+            self.assertEqual([s["date"] for s in self.ok("GET", "/api/investments")], [yday.isoformat()])
+            self.assertEqual(self.ok("GET", "/api/investments/prices")["funds_at"], yday.isoformat())
+            # Today's holdings are the latest values, still.
+            self.assertEqual([h["current_value"] for h in self.ok("GET", f"/api/investments/{TODAY.isoformat()}/holdings")], [900.0])
+        # AMFI publishes today's NAV: today's record.
+        snaps = self.ok("GET", "/api/investments")
+        self.assertEqual([s["date"] for s in snaps], [TODAY.isoformat(), yday.isoformat()])
+        self.assertEqual(self.ok("GET", "/api/investments/prices")["funds_at"], TODAY.isoformat())
+
+    def test_what_a_holding_needs(self):
+        for body, message in (({"units": 10}, "Enter the average NAV"), ({"avg_nav": 50}, "Enter the units you hold"),
+                              ({"units": 0, "avg_nav": 50}, "Enter the units you hold"), ({"units": 5, "avg_nav": "x"}, "Enter the average NAV"),
+                              ({}, "Enter what you hold, an amount, or a SIP")):
+            resp = self.call("POST", "/api/funds", body={"code": "122639", **body})
+            self.assertEqual((resp.status_code, resp.get_json()["message"]), (400, message), body)
+        self.assertEqual(self.rows(Fund), [])
 
     def test_funds_kite_tracks_are_left_to_kite(self):
         self.kite_synced(OWNER, TODAY - timedelta(days=2))
@@ -362,6 +398,64 @@ class AmfiFileTest(unittest.TestCase):
     def test_a_changed_file_is_refused_not_misread(self):
         with self.assertRaises(funds_service.NavUnavailable):
             funds_service.parse_amfi("Code;Name;Value\n1;X;2")
+
+
+class TidyTest(ApiCase):
+    """Records filed before fund values went under their NAV's day are moved there."""
+
+    def record(self, who, day, nav_day, value, fixed=0.0, units=10.0):
+        with self.app.app_context():
+            db.session.add(FundValue(owner_email=who, date=day, amfi_code="122639", name="Parag Parikh Flexi Cap Fund",
+                                     units=units, nav=value / units, nav_date=nav_day, invested=500.0, value=value))
+            if not PortfolioSnapshot.query.filter_by(owner_email=who, date=day).first():
+                db.session.add(PortfolioSnapshot(id=int(day.strftime("%Y%m%d")), owner_email=who, date=day,
+                                                 total_mf_inv=500.0, total_mf_curr=value, total_fixed_income_inv=fixed,
+                                                 total_fixed_income_curr=fixed, grand_total_inv=500.0 + fixed,
+                                                 grand_total_curr=value + fixed))
+            db.session.commit()
+
+    def test_each_days_values_go_to_their_navs_day(self):
+        tue, mon, wed = date(2026, 10, 6), date(2026, 10, 5), date(2026, 10, 7)
+        fri, sat, thu = date(2026, 10, 9), date(2026, 10, 10), date(2026, 10, 8)
+        self.record(FRIEND, tue, mon, 800.0, fixed=100.0)     # opened Tuesday morning: Monday's NAV
+        self.record(FRIEND, thu, wed, 820.0, fixed=100.0)     # Thursday morning: Wednesday's
+        self.record(FRIEND, fri, fri, 860.0, fixed=110.0)     # Friday evening: Friday's own
+        self.record(FRIEND, sat, fri, 870.0, fixed=120.0)     # Saturday: Friday's again, the latest look
+        snaps = {s["date"]: s for s in self.ok("GET", "/api/investments")}
+        self.assertEqual(sorted(snaps), [mon.isoformat(), wed.isoformat(), fri.isoformat()])
+        # Each morning's record, moved to its NAV's day as it was.
+        self.assertEqual((snaps[mon.isoformat()]["curr_mf"], snaps[mon.isoformat()]["curr_fixed"]), (800.0, 100.0))
+        self.assertEqual((snaps[wed.isoformat()]["curr_mf"], snaps[wed.isoformat()]["curr_fixed"]), (820.0, 100.0))
+        # Friday keeps its own record (manual assets as recorded), with Saturday's latest look of its NAV.
+        self.assertEqual((snaps[fri.isoformat()]["curr_mf"], snaps[fri.isoformat()]["curr_fixed"]), (870.0, 110.0))
+        self.assertEqual(snaps[fri.isoformat()]["total_curr"], 980.0)
+        with self.app.app_context():
+            self.assertEqual(sorted({v.date for v in FundValue.query.all()}), [mon, wed, fri])
+        # Once tidied, nothing's left to find.
+        with self.app.app_context():
+            from flask import g
+            with self.app.test_request_context():
+                g.data_owner = FRIEND
+                self.assertEqual(funds_service.tidy_fund_days(), 0)
+
+    def test_a_day_with_a_kite_sync_keeps_its_record(self):
+        tue, mon = date(2026, 10, 6), date(2026, 10, 5)
+        self.record(OWNER, tue, mon, 800.0)
+        with self.app.app_context():
+            db.session.add(EquityHolding(id=1, owner_email=OWNER, date=tue, symbol="INFY", quantity=1, average_price=100,
+                                         ltp=150, invested_value=100, current_value=150))
+            db.session.commit()
+        snaps = {s["date"]: s for s in self.ok("GET", "/api/investments", OWNER)}
+        self.assertEqual(sorted(snaps), [mon.isoformat(), tue.isoformat()])
+        # Tuesday: Kite's that day, and the funds as they stood (Monday's NAV).
+        self.assertEqual((snaps[tue.isoformat()]["curr_stocks"], snaps[tue.isoformat()]["curr_mf"]), (150.0, 800.0))
+        # Monday: the funds at its own NAV; Kite hadn't synced yet.
+        self.assertEqual((snaps[mon.isoformat()]["curr_stocks"], snaps[mon.isoformat()]["curr_mf"]), (0, 800.0))
+
+    def test_records_already_on_their_navs_day_stay(self):
+        mon = date(2026, 10, 5)
+        self.record(FRIEND, mon, mon, 800.0)
+        self.assertEqual([s["date"] for s in self.ok("GET", "/api/investments")], [mon.isoformat()])
 
 
 if __name__ == "__main__":
