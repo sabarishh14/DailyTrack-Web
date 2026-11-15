@@ -85,6 +85,38 @@ class AccountsApiTest(unittest.TestCase):
         self.assertEqual(resp.status_code, 200, resp.get_json())
         self.assertEqual(resp.get_json()["accounts"], ["CC-AXIS", "HDFC"])
 
+    def test_accounts_come_most_used_first(self):
+        from datetime import date, timedelta
+        from blueprints.money_query import money_query_bp
+        from models import Transaction
+        self.app.register_blueprint(money_query_bp)
+        for name in ("AAA", "IDBI", "KOTAK", "OLD", "ZED"):
+            self.add(name=name, type="savings")
+        self.add(name="AXIS", type="credit_card")
+        today, long_ago = date.today(), date.today() - timedelta(days=400)
+        uses = {"KOTAK": [today] * 3, "CC-AXIS": [today] * 2, "IDBI": [today] * 2 + [long_ago],
+                "OLD": [long_ago] * 9, "ZED": [long_ago]}
+        with self.app.app_context():
+            n = 0
+            for account, days in uses.items():
+                for d in days:
+                    n += 1
+                    db.session.add(Transaction(id=n, owner_email=OWNER, account=account, date=d, month=d.replace(day=1),
+                                               type="Debit", heading="Food", amount=10))
+            db.session.commit()
+        # Recent use first, then all-time use (a put-away account drops down), then
+        # by name; one with nothing on it comes last.
+        expected = ["KOTAK", "IDBI", "CC-AXIS", "OLD", "ZED", "AAA"]
+        resp = self.client.get("/api/accounts", headers={"Authorization": f"Bearer {setup._token(OWNER)}"})
+        self.assertEqual([a["account"] for a in resp.get_json()], expected)
+        auth = {"Authorization": f"Bearer {setup._token(OWNER)}"}
+        from unittest import mock
+        import blueprints.money_query as mq
+        with mock.patch.object(mq, "_meta_fingerprint", return_value="same"), mock.patch.dict(mq._meta_cache, clear=True):
+            for _ in range(2):  # the second read is served from the cache
+                self.assertEqual(self.client.get("/api/money/meta", headers=auth).get_json()["accounts"], expected)
+            self.assertEqual(len(mq._meta_cache), 1)
+
     def test_names_are_unique_whatever_the_case(self):
         self.add(name="KOTAK", type="savings")
         resp = self.add(name="kotak", type="savings")

@@ -155,6 +155,17 @@ def _balance_changes(before):
         "currency": acc.currency or currencies.HOME,
     } for acc in sorted(accounts, key=lambda a: a.account)]
 
+# Account lists come most used first: by use in the last few months (so a card
+# put away drops down), then over all time, then by name.
+RECENT_USE_DAYS = 90
+
+def use_since():
+    return datetime.now(pytz.timezone('Asia/Kolkata')).date() - timedelta(days=RECENT_USE_DAYS)
+
+def by_use(name, recent, total):
+    """Sort key for an account from its recent and all-time transaction counts."""
+    return (-int(recent or 0), -int(total or 0), (name or '').lower())
+
 def card_usage(account_names, today=None, counted_only=False):
     """What each credit card among account_names has been used for this
     calendar month (IST): spends minus refunds, never below zero. Cards don't
@@ -324,7 +335,14 @@ def sync_db_to_sheets():
 @require_access("money")
 def get_accounts():
     access = current_access()
-    accounts = [acc for acc in Account.query.all() if access.account_allowed(acc.account)]
+    # Most used first, counted in the same query, so the order costs no extra trip.
+    def uses(*when):
+        return (db.session.query(db.func.count(Transaction.id))
+                .filter(Transaction.owner_email == Account.owner_email, Transaction.account == Account.account, *when)
+                .correlate(Account).scalar_subquery())
+    rows = db.session.query(Account, uses(Transaction.date >= use_since()), uses()).all()
+    accounts = [acc for acc, _, _ in sorted(rows, key=lambda r: by_use(r[0].account, r[1], r[2]))
+                if access.account_allowed(acc.account)]
     show = access.balances_visible
     used = card_usage([acc.account for acc in accounts]) if show else {}
     counted = card_usage([acc.account for acc in accounts], counted_only=True) if show else {}

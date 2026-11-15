@@ -31,7 +31,7 @@ import smart_search
 from extensions import db, SHEETS_URL
 from models import Transaction, Split, Account, BalanceAdjustment
 from access import require_access, current_access, owner_only
-from blueprints.money import set_balance
+from blueprints.money import set_balance, by_use, use_since
 from tenancy import data_owner
 
 money_query_bp = Blueprint("money_query", __name__)
@@ -217,12 +217,13 @@ def _meta_fingerprint():
 
 
 def _with_every_account(tx_accounts):
-    """The accounts transactions use, plus every account that's been set up (and
-    may be seen), so one added a moment ago, with nothing on it yet, can be picked
-    straight away. Read fresh each time: the cache follows transactions only."""
+    """The accounts transactions use, most used first, then every other account
+    that's been set up (and may be seen), so one added a moment ago, with nothing
+    on it yet, can be picked straight away. Read fresh each time: the cache follows
+    transactions only."""
     access = current_access()
-    names = set(tx_accounts) | {a for (a,) in db.session.query(Account.account).all() if a}
-    return sorted(n for n in names if access.account_allowed(n))
+    unused = sorted({a for (a,) in db.session.query(Account.account).all() if a} - set(tx_accounts), key=str.lower)
+    return [n for n in [*tx_accounts, *unused] if access.account_allowed(n)]
 
 
 # ---- endpoints ----
@@ -245,7 +246,11 @@ def money_meta():
     fys = sorted({f"FY {m.year if m.month >= 4 else m.year - 1}-{(m.year if m.month >= 4 else m.year - 1) + 1}" for m in months}, reverse=True)
 
     headings = sorted(h for (h,) in _scoped(Transaction.heading).distinct().all() if h)
-    accounts = sorted(a for (a,) in _scoped(Transaction.account).distinct().all() if a)
+    # Most used first (see by_use): the order every account picker and filter shows.
+    recent = func.sum(case((Transaction.date >= use_since(), 1), else_=0))
+    accounts = [a for a, r, t in sorted(
+        _scoped(Transaction.account, recent, func.count()).group_by(Transaction.account).all(),
+        key=lambda row: by_use(*row)) if a]
     types = sorted({t.capitalize() for (t,) in _scoped(Transaction.type).distinct().all() if t})
 
     excluded = func.coalesce(Transaction.exclude_analytics, False)

@@ -17,19 +17,15 @@ export const getBankEmoji = (accountName) => {
 export const accountColor = (name) => BANKS[name]?.color || (isCcAccount(name) ? '#ec4899' : undefined);
 
 /**
- * Accounts as dropdown options: the familiar ones first in their usual order,
- * then any added since, alphabetically. Until the real list has loaded, the
- * familiar ones alone.
+ * Accounts as dropdown options, in the order given: the server lists them most
+ * used first (/accounts and /money/meta), so the ones in use come to the top.
  */
 export function accountOptions(names) {
-  const known = Object.keys(BANKS);
-  const rank = (n) => { const i = known.indexOf(n); return i === -1 ? known.length : i; };
   return [...new Set((names || []).filter(Boolean))]
-    .sort((a, b) => rank(a) - rank(b) || a.localeCompare(b))
     .map(n => ({ value: n, label: `${getBankEmoji(n)} ${n}` }));
 }
 
-/** The account new entries start on: the first of the person's own, or none yet. */
+/** The account new entries start on: the most used of the person's own, or none yet. */
 export const defaultAccount = (accounts) =>
   accountOptions((accounts || []).map(a => (typeof a === 'string' ? a : a?.account)))[0]?.value || '';
 
