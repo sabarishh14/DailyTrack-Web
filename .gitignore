@@ -5,3 +5,5 @@ __pycache__/
 *.txt*
 firebase-credentials.json
 dist/
+# Local SQLite files from test servers: never committed (Hugging Face refuses binary files)
+backend/instance/
