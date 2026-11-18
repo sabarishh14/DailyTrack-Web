@@ -10799,12 +10799,6 @@ input[type="date"]::-webkit-calendar-picker-indicator {
 .fd-drop-icon { display: flex; align-items: center; justify-content: center; width: 42px; height: 42px; margin-bottom: 0.45rem;
   border-radius: 12px; background: rgba(var(--accent-rgb), 0.14); color: var(--accent-text); }
 .fd-drop-name { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; }
-.fd-password { position: relative; }
-.fd-password .inp { padding-right: 2.9rem; }
-.fd-masked { -webkit-text-security: disc; }
-.fd-eye { position: absolute; top: 50%; right: 0.4rem; transform: translateY(-50%); display: flex; align-items: center; justify-content: center;
-  width: 34px; height: 34px; border: none; border-radius: 8px; background: transparent; color: var(--text3); cursor: pointer; }
-.fd-eye:hover { background: var(--card2); color: var(--text); }
 .fd-privacy { display: flex; align-items: center; justify-content: center; gap: 0.35rem; margin: 0; font-size: 0.75rem; color: var(--text2); }
 
 /* add by hand */

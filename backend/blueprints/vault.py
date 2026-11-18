@@ -23,7 +23,6 @@ checks it, and only then (POST /api/vault/finish, which checks again) are the
 readable rows deleted. Turning it off moves everything back the same way.
 """
 import hashlib
-import io
 import re
 from datetime import date, datetime, timedelta
 
@@ -600,22 +599,20 @@ def kite_sync():
 @vault_bp.route('/api/vault/cas', methods=['POST'])
 @require_api_key
 def read_cas():
-    """A CAS PDF ("file") and its password ("password"), read in memory and
-    handed back plain: neither is kept or logged, and each folio number leaves
-    only as a hash to match re-imports and its last 4 digits."""
+    """MF Central's Excel ("file"), read in memory and handed back plain. It isn't
+    kept or logged, and each folio number leaves only as a hash to match
+    re-imports and its last 4 digits."""
     denied = _owner_writing()
     if denied:
         return denied
     upload = request.files.get("file")
     if upload is None:
-        return _bad("Choose your CAS PDF")
+        return _bad("Choose MF Central's Excel")
     data = upload.read(MAX_STATEMENT_BYTES + 1)
     if len(data) > MAX_STATEMENT_BYTES:
-        return _bad("That PDF is too large")
-    if not data.startswith(b"%PDF"):
-        return _bad("That isn't a PDF")
+        return _bad("That file is too large")
     try:
-        cas = funds_service.parse_cas(io.BytesIO(data), request.form.get("password") or "")
+        cas = funds_service.read_statement(data)
     except funds_service.StatementError as e:
         return _bad(str(e))
     finally:

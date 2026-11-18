@@ -203,8 +203,8 @@ def folio_ref(folio):
 
 
 def folio_tail(folio):
-    """The last 4 of the folio number itself: CAMS writes "12345678 / 0", and
-    the " / 0" is a check digit, not the number."""
+    """The last 4 of the folio number itself: a check digit after a "/"
+    ("12345678 / 0") isn't part of the number."""
     main = str(folio).split("/")[0]
     return re.sub(r"[^0-9A-Za-z]", "", main)[-4:] or None
 
@@ -523,30 +523,14 @@ def start_sip(fund, amount, day, since):
     return sip
 
 
-# ---- CAS statements ----
+# ---- statements ----
 
-def parse_cas(stream, password):
-    """casparser's reading of a CAMS / KFintech CAS, as plain dicts. The PDF and
-    its password go no further than this call."""
-    try:
-        from casparser import read_cas_pdf
-        from casparser.exceptions import CASParseError, IncorrectPasswordError
-    except ImportError as e:
-        raise StatementError("Statement import isn't set up on the server yet") from e
-    try:
-        data = read_cas_pdf(stream, password)
-    except IncorrectPasswordError as e:
-        raise StatementError("That password didn't open the PDF") from e
-    except CASParseError as e:
-        message = str(e)
-        if "password" in message.lower():
-            raise StatementError("That password didn't open the PDF") from e
-        raise StatementError("Couldn't read that statement. Use the Detailed CAS from CAMS or KFintech.") from e
-    except Exception as e:  # a damaged or unexpected PDF
-        raise StatementError("Couldn't read that PDF") from e
-    if not hasattr(data, "folios"):
-        raise StatementError("That's a demat (NSDL/CDSL) statement. For funds, use the CAS from CAMS or KFintech.")
-    return data.model_dump(mode="python", by_alias=True)
+def read_statement(data):
+    """An uploaded statement, read in memory: MF Central's Excel ("CAS detailed report")."""
+    if data.startswith(b"PK\x03\x04"):
+        import mfcentral
+        return mfcentral.read(data)
+    raise StatementError("Choose MF Central's Excel")
 
 
 def _as_date(value):
@@ -574,6 +558,7 @@ def import_statement(cas, today):
     kite = kite_tracked_names()
     summary = {"added": [], "updated": [], "closed": [], "skipped_kite": [], "unknown": [],
                "period": {"from": str(_as_date(cas["statement_period"]["from"])), "to": str(period_to)}}
+    seen_funds = set()
 
     for folio in cas.get("folios") or []:
         ref, tail = folio_ref(folio["folio"]), folio_tail(folio["folio"])
@@ -587,6 +572,16 @@ def import_statement(cas, today):
                 continue
 
             fund = Fund.query.filter_by(amfi_code=scheme["code"], folio_ref=ref).first()
+            if fund is None and tail:
+                # The same folio, written another way (an earlier import may have
+                # "12345678 / 0"): the fund and its last 4 digits find it.
+                fund = (Fund.query.filter(Fund.amfi_code == scheme["code"], Fund.folio_tail == tail,
+                                          Fund.folio_ref != MANUAL_FOLIO, Fund.id.notin_(seen_funds or [0]))
+                        .order_by(Fund.id).first())
+                if fund is not None:
+                    fund.folio_ref = ref
+            if fund is None and float(s["close"]) <= 0:
+                continue   # sold out before it was ever here: nothing to show
             is_new = fund is None
             if is_new:
                 fund = Fund(amfi_code=scheme["code"], folio_ref=ref, name=scheme["name"], units=0.0, invested=0, source="cas")
@@ -595,6 +590,7 @@ def import_statement(cas, today):
             fund.folio_tail, fund.source = tail, "cas"
             fund.statement_to = max(period_to, fund.statement_to or period_to)
             db.session.flush()
+            seen_funds.add(fund.id)
 
             existing = {k for (k,) in db.session.query(FundTransaction.key).filter(FundTransaction.fund_id == fund.id)}
             seen = Counter()
@@ -638,6 +634,72 @@ def import_statement(cas, today):
     db.session.flush()
     value_funds(today)
     return summary
+
+
+# ---- matching a fund named in words (MF Central names schemes, it has no codes) ----
+
+_NAME_ALIASES = ((r"\bsl\b", "sun life"), (r"\bpru\b", "prudential"), (r"\bopps?\b", "opportunities"),
+                 (r"\binfra\b", "infrastructure"), (r"\bfof\b", "fund of fund"),
+                 (r"\b(mid|small|large|multi|flexi)[\s-]+cap\b", r"\1cap"))
+_NAME_NOISE = {"fund", "plan", "growth", "direct", "regular", "reg", "option", "the", "and", "of", "mutual", "mf", "idcw",
+               "payout", "reinvestment", "dividend", "india", "scheme", "erstwhile", "formerly", "standard"}
+_NOT_GROWTH = re.compile(r"idcw|income distribution|dividend|payout|reinvest|bonus", re.I)
+
+
+def _name_words(name):
+    # "(formerly …)" / "(erstwhile …)" notes name the fund's past, not this scheme.
+    name = re.sub(r"\([^()]*\b(formerly|erstwhile|known as|merged)\b[^()]*\)", " ", (name or "").lower())
+    name = name.replace("&", " and ")
+    for pattern, repl in _NAME_ALIASES:
+        name = re.sub(pattern, repl, name)
+    return set(re.findall(r"[a-z0-9]+", name)) - _NAME_NOISE
+
+
+def _plan(text):
+    """'direct', 'regular', or None when the name doesn't say."""
+    if re.search(r"\bdirect\b", text or "", re.I):
+        return "direct"
+    if re.search(r"\b(regular|reg|standard)\b", text or "", re.I):
+        return "regular"
+    return None
+
+
+def _growth(text):
+    """True for Growth, False for IDCW / bonus, None when the name doesn't say."""
+    if _NOT_GROWTH.search(text or ""):
+        return False
+    return True if re.search(r"growth|cumulative", text or "", re.I) else None
+
+
+def match_scheme(name, plan=None, growth=None, nav=None):
+    """The AMFI scheme a fund named in words is: every word of the name in the
+    scheme's, the same plan and option where both say, and the closest NAV
+    (within 5%) when there's one to check. None when nothing fits."""
+    words = _name_words(name)
+    if not words:
+        return None
+    by_code = latest_navs()
+    live = max((s["date"] for s in by_code.values()), default=ist_today()) - timedelta(days=30)
+    best = None
+    for s in by_code.values():
+        if s["date"] < live:
+            continue                      # no longer priced: wound up or merged away
+        full = s["full_name"]
+        theirs = _name_words(full)
+        if not words <= theirs:
+            continue
+        p, g = _plan(full), _growth(full)
+        if plan and p and p != plan:
+            continue
+        if growth is not None and g is not None and g != growth:
+            continue
+        off = abs(s["nav"] - nav) / nav if nav else 0.0
+        # Closest NAV first (two-percent bands; a NAV more than 5% away only when
+        # nothing is closer), then the fewest extra words.
+        rank = (off > 0.05, round(off / 0.02), len(theirs - words), off)
+        if best is None or rank < best[0]:
+            best = (rank, s)
+    return best[1] if best else None
 
 
 # ---- what the Funds list shows ----

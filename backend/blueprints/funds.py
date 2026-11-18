@@ -1,6 +1,5 @@
 """Mutual funds held outside Kite: list, search, add by hand, SIPs, CAS import.
 The work happens in funds_service.py; see its docstring for how they fit in."""
-import io
 from datetime import datetime
 
 from flask import Blueprint, jsonify, request
@@ -196,18 +195,15 @@ def stop_sip(sip_id):
 @funds_bp.route('/api/funds/import', methods=['POST'])
 @require_access("invest")
 def import_statement():
-    """A CAS PDF (form field "file") and its password ("password"). Read in
-    memory: neither the PDF nor the password is kept or logged."""
+    """MF Central's Excel, as form field "file". Read in memory: it isn't kept or logged."""
     upload = request.files.get("file")
     if upload is None:
-        return _bad("Choose your CAS PDF")
+        return _bad("Choose MF Central's Excel")
     data = upload.read(MAX_STATEMENT_BYTES + 1)
     if len(data) > MAX_STATEMENT_BYTES:
-        return _bad("That PDF is too large")
-    if not data.startswith(b"%PDF"):
-        return _bad("That isn't a PDF")
+        return _bad("That file is too large")
     try:
-        cas = funds.parse_cas(io.BytesIO(data), request.form.get("password") or "")
+        cas = funds.read_statement(data)
     except funds.StatementError as e:
         return _bad(str(e))
     finally:

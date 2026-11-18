@@ -4,8 +4,8 @@
 // (backend/blueprints/invest.py, funds.py, funds_service.py, kite_daily.py);
 // keep them in step. The phone's VaultEngine.kt does the same.
 //
-// What only the server can reach (Kite, AMFI's NAVs, stock prices, reading a
-// CAS PDF) it asks for by name, never with amounts (blueprints/vault.py).
+// What only the server can reach (Kite, AMFI's NAVs, stock prices, reading MF
+// Central's Excel) it asks for by name, never with amounts (blueprints/vault.py).
 import { API } from '../constants';
 import { getToken } from '../utils';
 import { sha1Hex } from './crypto';
@@ -783,12 +783,22 @@ async function importStatement(t, cas, today) {
   const kite = kiteTrackedNames(t);
   const { byCode, byIsin } = await navs();
   const summary = { added: [], updated: [], closed: [], skipped_kite: [], unknown: [], period: cas.period };
+  const seenFunds = new Set();
   for (const folio of cas.folios || []) {
     for (const s of folio.schemes || []) {
       const scheme = byCode[String(s.amfi || '')] || byIsin[String(s.isin || '')];
       if (!scheme) { summary.unknown.push(s.scheme); continue; }
       if (kite.has(scheme.name.toLowerCase())) { summary.skipped_kite.push(scheme.name); continue; }
       let fund = t.funds.find(f => f.amfi_code === scheme.code && f.folio_ref === folio.ref);
+      if (!fund && folio.tail) {
+        // The same folio, written another way (an earlier import may have
+        // "12345678 / 0"): the fund and its last 4 digits find it.
+        fund = t.funds
+          .filter(f => f.amfi_code === scheme.code && f.folio_tail === folio.tail && f.folio_ref !== MANUAL_FOLIO && !seenFunds.has(f.id))
+          .sort((a, b) => Number(a.id) - Number(b.id))[0];
+        if (fund) fund.folio_ref = folio.ref;
+      }
+      if (!fund && Number(s.close) <= 0) continue;   // sold out before it was ever here: nothing to show
       const isNew = !fund;
       if (isNew) {
         fund = { id: newId(), amfi_code: scheme.code, isin: null, name: scheme.name, amc: null, folio_ref: folio.ref,
@@ -800,6 +810,7 @@ async function importStatement(t, cas, today) {
         statement_to: fund.statement_to && fund.statement_to > periodTo ? fund.statement_to : periodTo,
         updated_at: istNow(),
       });
+      seenFunds.add(fund.id);
       const existing = new Set(t.fund_tx.filter(x => x.fund_id === fund.id).map(x => x.key));
       const seen = new Map();
       for (const x of s.transactions || []) {
@@ -1289,10 +1300,10 @@ export async function handle(vault, method, path, query, body, readOnly) {
       }));
     }
     if (path === '/funds/import' && method === 'POST') {
-      // The PDF is read on the server and handed straight back (blueprints/vault.py).
+      // MF Central's Excel is read on the server and handed straight back (blueprints/vault.py).
       const res = await fetch(`${API}/vault/cas`, { method: 'POST', headers: { 'Authorization': `Bearer ${getToken()}` }, body });
       const json = await res.json().catch(() => ({}));
-      if (!res.ok || !json.success) return { status: res.ok ? 400 : res.status, body: { success: false, message: json.message || 'Couldn’t read that PDF' } };
+      if (!res.ok || !json.success) return { status: res.ok ? 400 : res.status, body: { success: false, message: json.message || 'Couldn’t read that statement' } };
       return ok(await write(async t => {
         const summary = await importStatement(t, json.cas, today);
         return { success: true, ...summary, funds: await fundsOverview(t) };

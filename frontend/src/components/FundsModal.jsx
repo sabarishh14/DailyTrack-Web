@@ -2,16 +2,12 @@ import { useEffect, useRef, useState } from 'react';
 import { API } from '../constants';
 import { fmt, getToken } from '../utils';
 
-// Mutual funds held outside Kite: import a CAS, add one by hand, SIPs. One
-// focused column whose view changes (your funds / import / add); the backend
-// values them daily at AMFI's NAV (backend/funds_service.py).
+// Mutual funds held outside Kite: import MF Central's statement, add one by
+// hand, SIPs. One focused column whose view changes (your funds / import / add);
+// the backend values them daily at AMFI's NAV (backend/funds_service.py).
 
-const CAMS_CAS = 'https://www.camsonline.com/Investors/Statements/Consolidated-Account-Statement';
-
-// A password field makes Chrome offer to save it once the import finishes, which
-// would keep a statement's password in the browser. A text field drawn as dots
-// isn't one; where dots can't be drawn, it stays a password field.
-const MASKABLE = typeof CSS !== 'undefined' && CSS.supports?.('-webkit-text-security', 'disc');
+const MF_CENTRAL = 'https://app.mfcentral.com/';
+const isExcel = (f) => f && /\.xlsx$/i.test(f.name);
 
 const auth = () => ({ 'Authorization': `Bearer ${getToken()}` });
 const today = () => new Date().toISOString().slice(0, 10);
@@ -44,13 +40,6 @@ const Back = () => <Icon d="M19 12H5M12 19l-7-7 7-7" />;
 const Close = () => <Icon d="M18 6 6 18M6 6l12 12" />;
 const Plus = (p) => <Icon {...p} d="M12 5v14M5 12h14" />;
 const Search = () => <Icon><circle cx="11" cy="11" r="7" /><path d="m20 20-3.5-3.5" /></Icon>;
-const Eye = () => <Icon><path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7S2 12 2 12z" /><circle cx="12" cy="12" r="3" /></Icon>;
-const EyeOff = () => (
-  <Icon>
-    <path d="M3 3l18 18M10.6 10.6a2 2 0 0 0 2.8 2.8" />
-    <path d="M9.9 5.2A10.4 10.4 0 0 1 12 5c6.4 0 10 7 10 7a17.4 17.4 0 0 1-2.4 3.3M6.6 6.6A17.2 17.2 0 0 0 2 12s3.6 7 10 7a9.6 9.6 0 0 0 5.4-1.6" />
-  </Icon>
-);
 const Doc = (p) => <Icon {...p}><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z" /><path d="M14 3v5h5M9 13h6M9 17h4" /></Icon>;
 const Upload = () => <Icon size={22}><path d="M12 15V4M7 9l5-5 5 5" /><path d="M5 15v4a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-4" /></Icon>;
 const Lock = () => <Icon size={14}><rect x="5" y="11" width="14" height="10" rx="2" /><path d="M8 11V7a4 4 0 0 1 8 0v4" /></Icon>;
@@ -99,17 +88,15 @@ function SipFields({ sip, onChange, noSince }) {
 }
 
 // ── Import ──────────────────────────────────────────────────────────────────
-const CAMS_STEPS = [
-  ['Statement type', 'Detailed'],
-  ['Period', <>Specific · from <span className="fd-nowrap">01-Jan-1990</span></>],
-  ['Folio listing', 'With zero balance folios'],
-  ['Password', 'Set your own; you’ll need it below'],
+const MFC_STEPS = [
+  ['Log in', 'New? Sign up with your PAN'],
+  ['Open', 'Statement → Detailed'],
+  ['Period', 'Specific period, earliest date'],
+  ['Click', 'Download as Excel'],
 ];
 
 function ImportView({ onDone }) {
   const [file, setFile] = useState(null);
-  const [password, setPassword] = useState('');
-  const [showPassword, setShowPassword] = useState(false);
   const [dragging, setDragging] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
@@ -118,15 +105,14 @@ function ImportView({ onDone }) {
   const pick = (f) => {
     setError('');
     if (!f) return;
-    if (f.type !== 'application/pdf' && !f.name.toLowerCase().endsWith('.pdf')) { setError('That isn’t a PDF'); return; }
+    if (!isExcel(f)) { setError('Choose MF Central’s Excel'); return; }
     setFile(f);
   };
 
   const submit = async () => {
-    if (!file || !password || busy) return;
+    if (!file || busy) return;
     const form = new FormData();
     form.append('file', file);
-    form.append('password', password);
     setBusy(true); setError('');
     try {
       const r = await send('POST', '/funds/import', form);
@@ -136,7 +122,6 @@ function ImportView({ onDone }) {
         r.skipped_kite.length && `${r.skipped_kite.length} already in Kite`,
         r.unknown.length && `${r.unknown.length} not found`,
       ].filter(Boolean);
-      setPassword('');
       onDone(parts.length ? parts.join(' · ') : 'Nothing new in that statement', r.funds);
     } catch (e) { setError(e.message); }
     setBusy(false);
@@ -147,14 +132,14 @@ function ImportView({ onDone }) {
       <section className="fd-step">
         <span className="fd-step-no">1</span>
         <div className="fd-step-body">
-          <h4>Get your statement from CAMS</h4>
-          <p className="fd-muted">Tick the disclaimer, enter your email, then choose:</p>
+          <h4>Get your statement from MF Central</h4>
+          <p className="fd-muted">Every fund under your PAN, from every app you invest through.</p>
           <dl className="fd-settings">
-            {CAMS_STEPS.map(([k, v]) => <div key={k}><dt>{k}</dt><dd>{v}</dd></div>)}
+            {MFC_STEPS.map(([k, v]) => <div key={k}><dt>{k}</dt><dd>{v}</dd></div>)}
           </dl>
           <div className="fd-step-foot">
-            <a className="fd-btn ghost" href={CAMS_CAS} target="_blank" rel="noopener noreferrer">Open CAMS <External /></a>
-            <span className="fd-muted">Arrives by email in a few minutes.</span>
+            <a className="fd-btn ghost" href={MF_CENTRAL} target="_blank" rel="noopener noreferrer">Open MF Central <External /></a>
+            <span className="fd-muted">Ready in My Downloads in about 30 min.</span>
           </div>
         </div>
       </section>
@@ -172,7 +157,7 @@ function ImportView({ onDone }) {
             role="button" tabIndex={0}
             onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') picker.current?.click(); }}
           >
-            <input ref={picker} type="file" accept="application/pdf,.pdf" hidden onChange={e => pick(e.target.files?.[0])} />
+            <input ref={picker} type="file" accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" hidden onChange={e => pick(e.target.files?.[0])} />
             {file ? (
               <>
                 <span className="fd-drop-icon"><Doc size={22} /></span>
@@ -182,27 +167,16 @@ function ImportView({ onDone }) {
             ) : (
               <>
                 <span className="fd-drop-icon"><Upload /></span>
-                <span><b>Drop your CAS PDF here</b></span>
+                <span><b>Drop the Excel here</b></span>
                 <span className="fd-muted">or click to choose</span>
               </>
             )}
           </div>
-          <div className="fd-password">
-            <input className={`inp ${MASKABLE && !showPassword && password ? 'fd-masked' : ''}`}
-                   type={showPassword || MASKABLE ? 'text' : 'password'} placeholder="PDF password"
-                   autoComplete="off" autoCapitalize="off" autoCorrect="off" spellCheck={false}
-                   value={password} onChange={e => { setPassword(e.target.value); setError(''); }}
-                   onKeyDown={e => { if (e.key === 'Enter') submit(); }} />
-            <button type="button" className="fd-eye" onClick={() => setShowPassword(s => !s)}
-                    aria-label={showPassword ? 'Hide password' : 'Show password'}>
-              {showPassword ? <EyeOff /> : <Eye />}
-            </button>
-          </div>
           {error && <p className="fd-error">{error}</p>}
-          <button className="fd-btn primary wide" disabled={!file || !password || busy} onClick={submit}>
+          <button className="fd-btn primary wide" disabled={!file || busy} onClick={submit}>
             {busy ? 'Reading your statement…' : 'Import'}
           </button>
-          <p className="fd-privacy"><Lock /> Read once and never stored: not the PDF, not the password.</p>
+          <p className="fd-privacy"><Lock /> Read once and never stored: only your funds are kept.</p>
         </div>
       </section>
     </div>
@@ -537,7 +511,7 @@ function Welcome({ onImport, onAdd }) {
             <span className="fd-badge">Recommended</span>
           </span>
           <span className="fd-option-title">Import statement</span>
-          <span className="fd-muted">Every fund and transaction at once, from your CAS.</span>
+          <span className="fd-muted">Every fund at once, from MF Central.</span>
         </button>
         <button className="fd-option" onClick={onAdd}>
           <span className="fd-option-top"><span className="fd-option-icon"><Plus size={22} /></span></span>

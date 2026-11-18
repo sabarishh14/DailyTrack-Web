@@ -46,7 +46,7 @@ def past_navs(code):
 
 
 def statement(units=10.0, cost=950.0, to=TODAY - timedelta(days=1), transactions=None):
-    """A CAMS statement the way funds_service.parse_cas hands it over."""
+    """A statement the way funds_service.read_statement hands it over."""
     rows = transactions if transactions is not None else [
         {"date": date(2026, 4, 2), "amount": 500.0, "units": 5.0, "nav": 100.0, "type": "PURCHASE"},
         {"date": date(2026, 4, 2), "amount": 0.02, "units": None, "nav": None, "type": "STAMP_DUTY_TAX"},
@@ -54,8 +54,7 @@ def statement(units=10.0, cost=950.0, to=TODAY - timedelta(days=1), transactions
     ]
     return {
         "statement_period": {"from": "01-Apr-2026", "to": to.strftime("%d-%b-%Y")},
-        "file_type": "CAMS", "cas_type": "DETAILED",
-        "investor_info": {"name": "Someone", "email": "x@y.z", "address": "Somewhere", "mobile": "0"},
+        "file_type": "MFCENTRAL", "cas_type": "DETAILED",
         "folios": [{"folio": "1234567/89", "amc": "PPFAS Mutual Fund", "schemes": [{
             "scheme": "Parag Parikh Flexi Cap Fund - Direct Plan Growth", "isin": "INF879O01027", "amfi": "122639",
             "open": 0, "close": units, "close_calculated": units,
@@ -100,11 +99,11 @@ class ApiCase(unittest.TestCase):
         self.assertEqual(resp.status_code, 200, resp.get_json())
         return resp.get_json()
 
-    def upload(self, cas, who=FRIEND, password="pw"):
-        with mock.patch.object(funds_service, "parse_cas", lambda stream, pw: cas):
+    def upload(self, cas, who=FRIEND):
+        with mock.patch.object(funds_service, "read_statement", lambda data: cas):
             return self.client.post(
                 "/api/funds/import", content_type="multipart/form-data",
-                data={"file": (io.BytesIO(b"%PDF-1.4 stand-in"), "cas.pdf"), "password": password},
+                data={"file": (io.BytesIO(b"PK\x03\x04 stand-in"), "statement.xlsx")},
                 headers={"Authorization": f"Bearer {setup._token(who)}"})
 
     def imported(self, cas, who=FRIEND):
@@ -147,7 +146,7 @@ class FundsApiTest(ApiCase):
         self.assertNotIn("1234567", f"{fund.folio_ref}{fund.folio_tail}")
 
     def test_a_folio_shows_as_the_last_4_of_its_number(self):
-        # CAMS writes folios as "number / check digit".
+        # A statement may write a folio as "number / check digit".
         self.assertEqual([funds_service.folio_tail(f) for f in ("91012345678 / 0", "1234567/89", "AB12C34")],
                          ["5678", "4567", "2C34"])
 
@@ -233,20 +232,12 @@ class FundsApiTest(ApiCase):
         self.imported(statement(), who=OWNER)
         self.assertEqual([s["date"] for s in self.ok("GET", "/api/investments", OWNER)], [synced.isoformat()])
 
-    def test_a_wrong_password_says_so(self):
-        def refuse(stream, password):
-            raise funds_service.StatementError("That password didn't open the PDF")
-        with mock.patch.object(funds_service, "parse_cas", refuse):
+    def test_only_mf_centrals_excel_is_read(self):
+        for data, name in ((b"%PDF-1.4", "statement.pdf"), (b"hello", "statement.txt")):
             resp = self.client.post("/api/funds/import", content_type="multipart/form-data",
-                                    data={"file": (io.BytesIO(b"%PDF-1.4"), "cas.pdf"), "password": "nope"},
+                                    data={"file": (io.BytesIO(data), name)},
                                     headers={"Authorization": f"Bearer {setup._token(FRIEND)}"})
-        self.assertEqual((resp.status_code, resp.get_json()["message"]), (400, "That password didn't open the PDF"))
-
-    def test_only_a_pdf_is_read(self):
-        resp = self.client.post("/api/funds/import", content_type="multipart/form-data",
-                                data={"file": (io.BytesIO(b"hello"), "cas.txt"), "password": "pw"},
-                                headers={"Authorization": f"Bearer {setup._token(FRIEND)}"})
-        self.assertEqual(resp.status_code, 400)
+            self.assertEqual((resp.status_code, resp.get_json()["message"]), (400, "Choose MF Central's Excel"))
 
     # ---- by hand, and SIPs ----
     def test_a_sip_since_months_ago_fills_in_every_instalment(self):
