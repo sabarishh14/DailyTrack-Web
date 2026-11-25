@@ -60,89 +60,62 @@ function doPost(e) {
       let errors = [];
       let inserted = 0;
 
-      // ==========================================
-      // OPTIMIZATION 1: Build a global ID cache ONCE instead of scanning every sheet per transaction.
-      // Old code: For each tx, loop ALL sheets and read column J → O(txns × sheets × rows)
-      // New code: Read column J of each sheet ONCE upfront → O(sheets × rows), then O(1) lookups.
-      // ==========================================
-      // Normalize IDs to match the old loose-equality (==) behavior
-      const normalizeId = (val) => String(val).trim();
-      
-      const idCache = {}; // { normalized_id: { sheet, row } }
-      const allSheets = ss.getSheets();
-      for (const s of allSheets) {
-        const sLastUsed = s.getLastRow();
-        if (sLastUsed >= 2 && s.getMaxColumns() >= 10) {
-          const idValues = s.getRange(2, 10, sLastUsed - 1, 1).getValues();
-          for (let i = 0; i < idValues.length; i++) {
-            if (idValues[i][0] !== "" && idValues[i][0] !== null && idValues[i][0] !== undefined) {
-              idCache[normalizeId(idValues[i][0])] = { sheet: s, row: i + 2 };
-            }
-          }
+      // Every ID already on a sheet, read once: { id: { sheet, row } }.
+      const idCache = {};
+      for (const s of transactionSheets(ss)) {
+        const L = layoutOf(s);
+        const last = s.getLastRow();
+        if (last < 2) continue;
+        const ids = s.getRange(2, L.id, last - 1, 1).getValues();
+        for (let i = 0; i < ids.length; i++) {
+          if (ids[i][0] !== "" && ids[i][0] !== null) idCache[normalizeId(ids[i][0])] = { sheet: s, row: i + 2 };
         }
       }
 
-      // ==========================================
-      // OPTIMIZATION 2: Group transactions by target sheet so we read each sheet's dates ONCE.
-      // ==========================================
-      const txBySheet = {}; // { sheetName: [{ tx, sheetName, txDate, formattedType, id, createdAt }] }
-      
+      // Grouped by sheet, so each sheet's dates are read once.
+      const txBySheet = {};
+
       records.forEach(tx => {
         const { date, month, type: rawType, heading, description, amount, account } = tx;
         const id = tx.id || Utilities.getUuid();
-        
-        let sheetName = account;
-        if (account === "Cash") sheetName = "IDBI";
-        else if (account && account.startsWith("CC")) sheetName = "CreditCard";
-
+        const sheetName = sheetNameFor(account);
         const sheet = ss.getSheetByName(sheetName);
         if (!sheet) { errors.push(sheetName); return; }
+        const L = layoutOf(sheet);
 
         const txDate = new Date(date);
         txDate.setHours(0, 0, 0, 0);
         const formattedType = rawType ? rawType.charAt(0).toUpperCase() + rawType.slice(1).toLowerCase() : "";
 
-        // Handle EDIT (ID already exists in some sheet)
+        // Already on a sheet: an edit.
         const cached = idCache[normalizeId(id)];
         if (cached) {
           const foundSheet = cached.sheet;
           const existingRow = cached.row;
-          const existingDateRaw = foundSheet.getRange(existingRow, 1).getValue();
-          let existingDate = new Date(existingDateRaw);
+          const existingDate = new Date(foundSheet.getRange(existingRow, 1).getValue());
           existingDate.setHours(0, 0, 0, 0);
 
           if (foundSheet.getName() === sheetName && existingDate.getTime() === txDate.getTime()) {
-            // Update in place — no need to insert
+            // Same sheet, same day: update in place.
             foundSheet.getRange(existingRow, 1, 1, 6).setValues([[new Date(date), month, formattedType, heading, description, amount]]);
-            foundSheet.getRange(existingRow, (sheetName === "IDBI" || sheetName === "CreditCard") ? 9 : 8).setValue(account);
+            foundSheet.getRange(existingRow, L.account).setValue(account);
             inserted++;
-            return; 
-          } else {
-            // Date or sheet changed. Delete old row.
-            foundSheet.deleteRow(existingRow);
-            if (existingRow > 2 && existingRow <= foundSheet.getLastRow()) {
-              const fName = foundSheet.getName();
-              if (fName === "IDBI" || fName === "CreditCard") foundSheet.getRange(existingRow - 1, 7, 1, 2).copyTo(foundSheet.getRange(existingRow, 7, 1, 2));
-              else foundSheet.getRange(existingRow - 1, 7).copyTo(foundSheet.getRange(existingRow, 7));
-            }
-            // Fall through to insert
+            return;
           }
+          // Another day or sheet: the old row goes, and it's inserted afresh below.
+          removeRow(foundSheet, existingRow);
         }
 
-        // Queue for batch insert
         if (!txBySheet[sheetName]) txBySheet[sheetName] = [];
         txBySheet[sheetName].push({ date, month, formattedType, heading, description, amount, account, txDate, id, createdAt: new Date() });
       });
 
-      // ==========================================
-      // BATCH INSERT: Process each sheet's queued transactions together.
-      // Read the sheet's date column ONCE, then insert all transactions.
-      // ==========================================
       for (const sheetName in txBySheet) {
         const sheet = ss.getSheetByName(sheetName);
         if (!sheet) continue;
+        const L = layoutOf(sheet);
 
-        // Sort new transactions by date so insertions don't shift each other's positions
+        // Oldest first, so inserts don't shift each other's places.
         const txList = txBySheet[sheetName].sort((a, b) => a.txDate - b.txDate);
 
         for (const tx of txList) {
@@ -153,6 +126,7 @@ function doPost(e) {
             if (colA[i][0] !== "") { lastDataRow = i + 1; break; }
           }
 
+          // Kept in date order: before the first row with a later date.
           let insertRow = lastDataRow + 1;
           if (lastDataRow >= 2) {
             const dateValues = sheet.getRange(2, 1, lastDataRow - 1, 1).getValues();
@@ -167,64 +141,39 @@ function doPost(e) {
           sheet.insertRowBefore(insertRow);
           sheet.getRange(insertRow, 1, 1, 6).setValues([[new Date(tx.date), tx.month, tx.formattedType, tx.heading, tx.description, tx.amount]]);
           const sourceRow = (insertRow > 2) ? insertRow - 1 : (lastDataRow >= 2 ? insertRow + 1 : 0);
-
           if (sourceRow > 0) {
             sheet.getRange(sourceRow, 1, 1, 6).copyTo(sheet.getRange(insertRow, 1, 1, 6), SpreadsheetApp.CopyPasteType.PASTE_FORMAT, false);
-          }
-
-          if (sheetName === "IDBI" || sheetName === "CreditCard") {
-            if (sourceRow > 0) {
-              sheet.getRange(sourceRow, 7, 1, 2).copyTo(sheet.getRange(insertRow, 7, 1, 2));
-              if (insertRow <= sheet.getLastRow()) sheet.getRange(insertRow, 7, 1, 2).copyTo(sheet.getRange(insertRow + 1, 7, 1, 2));
+            // The running totals: the row above's formulas, and the row below re-pointed at this one.
+            if (L.calcWidth > 0) {
+              sheet.getRange(sourceRow, L.firstCalc, 1, L.calcWidth).copyTo(sheet.getRange(insertRow, L.firstCalc, 1, L.calcWidth));
+              if (insertRow < sheet.getLastRow()) {
+                sheet.getRange(insertRow, L.firstCalc, 1, L.calcWidth).copyTo(sheet.getRange(insertRow + 1, L.firstCalc, 1, L.calcWidth));
+              }
             }
-            sheet.getRange(insertRow, 9).setValue(tx.account);
-          } else {
-            if (sourceRow > 0) {
-              sheet.getRange(sourceRow, 7).copyTo(sheet.getRange(insertRow, 7));
-              if (insertRow <= sheet.getLastRow()) sheet.getRange(insertRow, 7).copyTo(sheet.getRange(insertRow + 1, 7));
-            }
-            sheet.getRange(insertRow, 8).setValue(tx.account);
           }
-
-          sheet.getRange(insertRow, 10, 1, 2).setValues([[tx.id, tx.createdAt]]);
+          sheet.getRange(insertRow, L.account).setValue(tx.account);
+          sheet.getRange(insertRow, L.id).setValue(tx.id);
+          sheet.getRange(insertRow, L.created).setValue(tx.createdAt);
           inserted++;
         }
       }
 
-      SpreadsheetApp.flush(); // Flush once at the end
-
+      SpreadsheetApp.flush();
       const msg = errors.length > 0 ? `${inserted} inserted. Skipped missing: ${[...new Set(errors)].join(", ")}` : `${inserted} transactions processed`;
       return ContentService.createTextOutput(JSON.stringify({status: "success", message: msg})).setMimeType(ContentService.MimeType.JSON);
-    } 
-    
+    }
+
     // ==========================================
     // 2. SINGLE DELETE
     // ==========================================
     else if (type === "delete_transaction") {
       const { id, account } = data;
-      let sheetName = account;
-      if (account === "Cash") sheetName = "IDBI";
-      else if (account && account.startsWith("CC")) sheetName = "CreditCard";
-
-      const sheet = ss.getSheetByName(sheetName);
+      const sheet = ss.getSheetByName(sheetNameFor(account));
       if (!sheet) return ContentService.createTextOutput(JSON.stringify({status: "error", message: "Sheet not found"})).setMimeType(ContentService.MimeType.JSON);
 
-      const lastUsed = sheet.getLastRow();
-      if (lastUsed < 2) return ContentService.createTextOutput(JSON.stringify({status: "success"})).setMimeType(ContentService.MimeType.JSON);
-
-      const idValues = sheet.getRange(2, 10, lastUsed - 1, 1).getValues(); 
-      let rowIndex = -1;
-      
-      for (let i = 0; i < idValues.length; i++) {
-        if (idValues[i][0] == id) { rowIndex = i + 2; break; }
-      }
-
-      if (rowIndex !== -1) {
-        sheet.deleteRow(rowIndex);
-        if (rowIndex > 2 && rowIndex <= sheet.getLastRow()) {
-          if (sheetName === "IDBI" || sheetName === "CreditCard") sheet.getRange(rowIndex - 1, 7, 1, 2).copyTo(sheet.getRange(rowIndex, 7, 1, 2));
-          else sheet.getRange(rowIndex - 1, 7).copyTo(sheet.getRange(rowIndex, 7));
-        }
+      const row = rowOfId(sheet, id);
+      if (row > 0) {
+        removeRow(sheet, row);
         SpreadsheetApp.flush();
       }
       return ContentService.createTextOutput(JSON.stringify({status: "success", message: "Transaction deleted"})).setMimeType(ContentService.MimeType.JSON);
@@ -235,67 +184,51 @@ function doPost(e) {
     // ==========================================
     else if (type === "backfill_ids") {
       let matchedCount = 0;
-      const dbTxList = records; // array of all txs from DB
-      const dbMap = {}; // Map by SheetName -> Signature -> ID
+      const dbMap = {}; // sheet name -> [{ sig, id, date, used }]
 
-      // 1. Group the incoming DB transactions by sheet and create a unique signature
-      dbTxList.forEach(tx => {
-        let sheetName = tx.account;
-        if (sheetName === "Cash") sheetName = "IDBI";
-        else if (sheetName && sheetName.startsWith("CC")) sheetName = "CreditCard";
-
+      // Each transaction's signature: date, amount and heading.
+      records.forEach(tx => {
+        const sheetName = sheetNameFor(tx.account);
         if (!dbMap[sheetName]) dbMap[sheetName] = [];
-        
-        // Signature: YYYY-MM-DD_Amount_Heading (ensures exact match)
         const txDate = new Date(tx.date);
         const sig = `${txDate.getFullYear()}-${txDate.getMonth()+1}-${txDate.getDate()}_${tx.amount}_${tx.heading}`.toLowerCase();
-        
         dbMap[sheetName].push({ sig: sig, id: tx.id, date: tx.date, used: false });
       });
 
-      // 2. Loop through the sheets to find empty ID cells
       for (const sheetName in dbMap) {
         const sheet = ss.getSheetByName(sheetName);
         if (!sheet) continue;
-
+        const L = layoutOf(sheet);
         const lastRow = sheet.getLastRow();
         if (lastRow < 2) continue;
 
-        // Read Columns A through K (1 to 11)
-        const range = sheet.getRange(2, 1, lastRow - 1, 11);
-        const values = range.getValues();
+        const values = sheet.getRange(2, 1, lastRow - 1, 6).getValues();
+        const ids = sheet.getRange(2, L.id, lastRow - 1, 1).getValues();
+        const created = sheet.getRange(2, L.created, lastRow - 1, 1).getValues();
         let updated = false;
 
         for (let i = 0; i < values.length; i++) {
-          const rawDate = values[i][0]; // Col A
-          const rowHeading = String(values[i][3] || "").trim(); // Col D
-          const rowAmount = values[i][5]; // Col F
-          const rowId = values[i][9]; // Col J (index 9)
-
-          // If ID is missing, try to find its match in the DB data
-          if (!rowId && rawDate && rowHeading && rowAmount !== "") {
-             const rowDate = new Date(rawDate);
-             if (!isNaN(rowDate.getTime())) {
-                const targetSig = `${rowDate.getFullYear()}-${rowDate.getMonth()+1}-${rowDate.getDate()}_${rowAmount}_${rowHeading}`.toLowerCase();
-
-                // Find a match that hasn't been claimed yet
-                const matches = dbMap[sheetName].filter(item => item.sig === targetSig && !item.used);
-                if (matches.length > 0) {
-                  const match = matches[0];
-                  match.used = true; // Claim this match so duplicates don't overlap
-                  values[i][9] = match.id.toString(); // Write ID
-                  values[i][10] = new Date(match.date); // Write Date of insertion
-                  updated = true;
-                  matchedCount++;
-                }
-             }
+          const rawDate = values[i][0];
+          const rowHeading = String(values[i][3] || "").trim();
+          const rowAmount = values[i][5];
+          if (ids[i][0] || !rawDate || !rowHeading || rowAmount === "") continue;
+          const rowDate = new Date(rawDate);
+          if (isNaN(rowDate.getTime())) continue;
+          const targetSig = `${rowDate.getFullYear()}-${rowDate.getMonth()+1}-${rowDate.getDate()}_${rowAmount}_${rowHeading}`.toLowerCase();
+          const match = dbMap[sheetName].find(item => item.sig === targetSig && !item.used);
+          if (match) {
+            match.used = true;              // claimed, so two alike rows don't take one ID
+            ids[i][0] = match.id.toString();
+            created[i][0] = new Date(match.date);
+            updated = true;
+            matchedCount++;
           }
         }
 
-        // 3. Write ONLY Columns J and K back to the sheet to protect your other data
+        // Only the ID and Created columns are written back.
         if (updated) {
-          const idAndCreated = values.map(row => [row[9], row[10]]);
-          sheet.getRange(2, 10, idAndCreated.length, 2).setValues(idAndCreated);
+          sheet.getRange(2, L.id, ids.length, 1).setValues(ids);
+          sheet.getRange(2, L.created, created.length, 1).setValues(created);
         }
       }
       SpreadsheetApp.flush();
@@ -308,39 +241,27 @@ function doPost(e) {
     else if (type === "bulk_delete_transactions") {
       let deletedCount = 0;
       const sheetDeletes = {};
-      
       records.forEach(item => {
-        let sName = item.account;
-        if (sName === "Cash") sName = "IDBI";
-        else if (sName && sName.startsWith("CC")) sName = "CreditCard";
+        const sName = sheetNameFor(item.account);
         if (!sheetDeletes[sName]) sheetDeletes[sName] = [];
-        sheetDeletes[sName].push(item.id.toString());
+        sheetDeletes[sName].push(normalizeId(item.id));
       });
 
       for (const sheetName in sheetDeletes) {
         const sheet = ss.getSheetByName(sheetName);
         if (!sheet) continue;
-
-        const idsToDelete = sheetDeletes[sheetName];
+        const L = layoutOf(sheet);
         const lastUsed = sheet.getLastRow();
         if (lastUsed < 2) continue;
 
-        const idValues = sheet.getRange(2, 10, lastUsed - 1, 1).getValues();
-        let rowsToDelete = [];
-        
+        const wanted = new Set(sheetDeletes[sheetName]);
+        const idValues = sheet.getRange(2, L.id, lastUsed - 1, 1).getValues();
+        const rows = [];
         for (let i = 0; i < idValues.length; i++) {
-          if (idsToDelete.includes(idValues[i][0].toString())) rowsToDelete.push(i + 2);
+          if (idValues[i][0] !== "" && wanted.has(normalizeId(idValues[i][0]))) rows.push(i + 2);
         }
-
-        // Delete from bottom to top so indices don't shift
-        rowsToDelete.sort((a, b) => b - a).forEach(rowIndex => {
-          sheet.deleteRow(rowIndex);
-          if (rowIndex > 2 && rowIndex <= sheet.getLastRow()) {
-            if (sheetName === "IDBI" || sheetName === "CreditCard") sheet.getRange(rowIndex - 1, 7, 1, 2).copyTo(sheet.getRange(rowIndex, 7, 1, 2));
-            else sheet.getRange(rowIndex - 1, 7).copyTo(sheet.getRange(rowIndex, 7));
-          }
-          deletedCount++;
-        });
+        // Bottom first, so the rows above keep their places.
+        rows.sort((a, b) => b - a).forEach(row => { removeRow(sheet, row); deletedCount++; });
       }
       SpreadsheetApp.flush();
       return ContentService.createTextOutput(JSON.stringify({status: "success", message: `${deletedCount} transactions bulk deleted cleanly`})).setMimeType(ContentService.MimeType.JSON);
@@ -401,6 +322,70 @@ function doPost(e) {
 
   } catch (err) {
     return ContentService.createTextOutput(JSON.stringify({status: "error", message: err.toString()})).setMimeType(ContentService.MimeType.JSON);
+  }
+}
+
+// ==========================================
+// SHEET LAYOUT (read from each sheet's header row)
+// ==========================================
+// Every transaction sheet starts Date, Month, Debit/Credit, Heading, Description,
+// Amt (A-F). After Amt come its running-total columns (a bank's balance; on
+// CreditCard one per card), then the account column ("Card" or "Account"), the
+// ID and when it was added. They're found by their header names, so adding a
+// card column (or any column) needs no change here. A header the script can't
+// find falls back to where it always was.
+
+const normalizeId = (val) => String(val).trim();
+
+/** Which sheet an account's transactions go on. */
+function sheetNameFor(account) {
+  if (account === "Cash") return "IDBI";
+  if (account && account.startsWith("CC")) return "CreditCard";
+  return account;
+}
+
+const _layouts = {};
+
+/** { account, id, created, firstCalc, calcWidth } column numbers for a sheet. */
+function layoutOf(sheet) {
+  const name = sheet.getName();
+  if (_layouts[name]) return _layouts[name];
+  const width = Math.max(sheet.getLastColumn(), 1);
+  const head = sheet.getRange(1, 1, 1, width).getValues()[0].map(h => String(h).trim().toLowerCase());
+  const col = (...names) => { const i = head.findIndex(h => names.includes(h)); return i < 0 ? 0 : i + 1; };
+
+  const amt = col("amt", "amount") || 6;
+  const account = col("card", "account") || (name === "IDBI" || name === "CreditCard" ? 9 : 8);
+  const id = col("id") || (name === "IDBI" || name === "CreditCard" ? account + 1 : 10);
+  const created = col("created", "created at", "added") || id + 1;
+  return (_layouts[name] = { account, id, created, firstCalc: amt + 1, calcWidth: Math.max(account - amt - 1, 0) });
+}
+
+/** The sheets transactions live on: "Date" first and an "Amt" column. */
+function transactionSheets(ss) {
+  return ss.getSheets().filter(s => {
+    if (s.getLastColumn() < 6) return false;
+    const head = s.getRange(1, 1, 1, s.getLastColumn()).getValues()[0].map(h => String(h).trim().toLowerCase());
+    return head[0] === "date" && (head.includes("amt") || head.includes("amount"));
+  });
+}
+
+/** The row holding an ID on a sheet, or 0. */
+function rowOfId(sheet, id) {
+  const last = sheet.getLastRow();
+  if (last < 2) return 0;
+  const ids = sheet.getRange(2, layoutOf(sheet).id, last - 1, 1).getValues();
+  const want = normalizeId(id);
+  for (let i = 0; i < ids.length; i++) if (ids[i][0] !== "" && normalizeId(ids[i][0]) === want) return i + 2;
+  return 0;
+}
+
+/** Deletes a row, then re-points the running totals of the row that moved up into its place. */
+function removeRow(sheet, row) {
+  const L = layoutOf(sheet);
+  sheet.deleteRow(row);
+  if (L.calcWidth > 0 && row > 2 && row <= sheet.getLastRow()) {
+    sheet.getRange(row - 1, L.firstCalc, 1, L.calcWidth).copyTo(sheet.getRange(row, L.firstCalc, 1, L.calcWidth));
   }
 }
 
